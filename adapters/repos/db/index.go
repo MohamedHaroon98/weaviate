@@ -1812,6 +1812,10 @@ func (i *Index) getOrInitShard(ctx context.Context, shardName string) (
 	return i.getOptInitLocalShard(ctx, shardName, true)
 }
 
+// getOptInitLocalShard returns the local shard with the given name.
+// It is ensured that the returned instance is a fully loaded shard if ensureInit is set to true.
+// The returned shard may be a lazy shard instance or nil if the shard hasn't yet been initialized.
+// The returned shard cannot be closed until release is called.
 func (i *Index) getOptInitLocalShard(ctx context.Context, shardName string, ensureInit bool) (
 	shard ShardLike, release func(), err error,
 ) {
