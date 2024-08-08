@@ -15,7 +15,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"sync"
-	"sync/atomic"
 
 	"github.com/sirupsen/logrus"
 	"github.com/weaviate/weaviate/adapters/repos/db/lsmkv"
@@ -61,32 +60,13 @@ func (cpi *compressedParallelIterator) IterateAll() chan []BQVecAndID {
 	wg := sync.WaitGroup{}
 	out := make(chan []BQVecAndID)
 
-	var cacheVecs []uint64
-	var cacheCounter atomic.Uint32
-	// preallocate a slice to store all the vectors in - this saves many (expensive) small allocations.
-	// Note that there was a bug that the dimensions were not restored when reloading the index, so we must check that
-	// both values are non-zero before pre-allocating. Otherwise, fall back to small allocations which will load everything
-	// correctly - the next shutdown will then write the correct values.
-	if cpi.cacheSize != 0 && cpi.dimension != 0 {
-		vecLength := cpi.dimension / 8 // 8 bytes per uint64
-		cacheVecs = make([]uint64, cpi.cacheSize*vecLength)
-		cacheCounter.Store(0)
-	}
-
 	// There are three scenarios:
 	// 1. Read from beginning to first checkpoint
 	// 2. Read from checkpoint n to checkpoint n+1
 	// 3. Read from last checkpoint to end
-	extract := func(k, v []byte) BQVecAndID {
+	extract := func(k, v []byte, vecBuf []uint64) BQVecAndID {
 		id := binary.BigEndian.Uint64(k)
-		var vec []uint64
-		if cacheVecs != nil {
-			length := uint32(len(v) / 8)
-			end := cacheCounter.Add(length)
-			vec = uint64SliceFromByteSlice(v, cacheVecs[end-length:end])
-		} else {
-			vec = uint64SliceFromByteSlice(v, make([]uint64, len(v)/8))
-		}
+		vec := uint64SliceFromByteSlice(v, vecBuf[:len(v)/8])
 		return BQVecAndID{id: id, vec: vec}
 	}
 
@@ -98,8 +78,13 @@ func (cpi *compressedParallelIterator) IterateAll() chan []BQVecAndID {
 		defer c.Close()
 		defer wg.Done()
 
+		var vecBuffer []uint64
 		for k, v := c.First(); k != nil && bytes.Compare(k, seeds[0]) < 0; k, v = c.Next() {
-			localResults = append(localResults, extract(k, v))
+			if vecBuffer == nil || len(vecBuffer) < len(v)/8 {
+				vecBuffer = make([]uint64, len(v)/8*1000)
+			}
+			localResults = append(localResults, extract(k, v, vecBuffer))
+			vecBuffer = vecBuffer[len(v)/8:]
 		}
 
 		out <- localResults
@@ -117,8 +102,14 @@ func (cpi *compressedParallelIterator) IterateAll() chan []BQVecAndID {
 			c := cpi.bucket.Cursor()
 			defer c.Close()
 
+			var vecBuffer []uint64
 			for k, v := c.Seek(start); k != nil && bytes.Compare(k, end) < 0; k, v = c.Next() {
-				localResults = append(localResults, extract(k, v))
+				if vecBuffer == nil || len(vecBuffer) < len(v)/8 {
+					vecBuffer = make([]uint64, len(v)/8*1000)
+				}
+
+				localResults = append(localResults, extract(k, v, vecBuffer))
+				vecBuffer = vecBuffer[len(v)/8:]
 			}
 
 			out <- localResults
@@ -133,8 +124,15 @@ func (cpi *compressedParallelIterator) IterateAll() chan []BQVecAndID {
 		defer wg.Done()
 		localResults := make([]BQVecAndID, 0, 10_000)
 
+		var vecBuffer []uint64
 		for k, v := c.Seek(seeds[len(seeds)-1]); k != nil; k, v = c.Next() {
-			localResults = append(localResults, extract(k, v))
+			if vecBuffer == nil || len(vecBuffer) < len(v)/8 {
+				vecBuffer = make([]uint64, len(v)/8*1000)
+			}
+
+			localResults = append(localResults, extract(k, v, vecBuffer))
+			vecBuffer = vecBuffer[len(v)/8:]
+
 		}
 
 		out <- localResults

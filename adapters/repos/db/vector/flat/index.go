@@ -725,7 +725,6 @@ func (index *flat) Shutdown(ctx context.Context) error {
 			if err := b.Put([]byte(bqCacheSizeKey), lenB); err != nil {
 				return err
 			}
-			fmt.Println("index.dims", index.dims)
 			dimB := make([]byte, 4) // make separate slice to avoid unexpected behavior such as values not written
 			binary.LittleEndian.PutUint32(dimB, uint32(index.dims))
 			if err := b.Put([]byte(DimensionKey), dimB); err != nil {
