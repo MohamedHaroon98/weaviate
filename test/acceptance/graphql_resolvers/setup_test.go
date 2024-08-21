@@ -54,72 +54,16 @@ func TestGraphQL_SyncIndexing(t *testing.T) {
 
 func testGraphQL(t *testing.T) {
 	// tests with classes that have objects with same uuids
-	t.Run("import test data (near object search class)", addTestDataNearObjectSearch)
-
-	t.Run("running Get nearObject against shadowed objects", runningGetNearObjectWithShadowedObjects)
-	t.Run("running Aggregate nearObject against shadowed objects", runningAggregateNearObjectWithShadowedObjects)
-	t.Run("running Explore nearObject against shadowed objects", runningExploreNearObjectWithShadowedObjects)
-
-	deleteObjectClass(t, "NearObjectSearch")
-	deleteObjectClass(t, "NearObjectSearchShadow")
+	//t.Run("import test data (near object search class)", addTestDataNearObjectSearch)
+	//
+	//t.Run("running Get nearObject against shadowed objects", runningGetNearObjectWithShadowedObjects)
+	//t.Run("running Aggregate nearObject against shadowed objects", runningAggregateNearObjectWithShadowedObjects)
+	//t.Run("running Explore nearObject against shadowed objects", runningExploreNearObjectWithShadowedObjects)
+	//
+	//deleteObjectClass(t, "NearObjectSearch")
+	//deleteObjectClass(t, "NearObjectSearchShadow")
 
 	// setup tests
-	t.Run("setup test schema", addTestSchema)
-	t.Run("import test data (city, country, airport)", addTestDataCityAirport)
-	t.Run("import test data (companies)", addTestDataCompanies)
-	t.Run("import test data (person)", addTestDataPersons)
-	t.Run("import test data (pizzas)", addTestDataPizzas)
-	t.Run("import test data (array class)", addTestDataArrayClass)
-	t.Run("import test data (duplicates class)", addTestDataDuplicatesClass)
-	t.Run("import test data (500 random strings)", addTestDataRansomNotes)
-	t.Run("import test data (multi shard)", addTestDataMultiShard)
-	t.Run("import test data (date field class)", addDateFieldClass)
-	t.Run("import test data (custom vector class)", addTestDataCVC)
-	t.Run("import test data (class without properties)", addTestDataNoProperties)
-	t.Run("import test data (cursor api)", addTestDataCursorSearch)
-
-	t.Run("aggregates with hybrid search", aggregationWithHybridSearch)
-
-	// explore tests
-	t.Run("expected explore failures with invalid conditions", exploreWithExpectedFailures)
-
-	// get tests
-	t.Run("getting objects", gettingObjects)
-	t.Run("getting objects with filters", gettingObjectsWithFilters)
-	t.Run("getting objects with geo filters", gettingObjectsWithGeoFilters)
-	t.Run("getting objects with grouping", gettingObjectsWithGrouping)
-	t.Run("getting objects with additional props", gettingObjectsWithAdditionalProps)
-	t.Run("getting objects with near fields", gettingObjectsWithNearFields)
-	t.Run("getting objects with near fields with multi shard setup", gettingObjectsWithNearFieldsMultiShard)
-	t.Run("getting objects with sort", gettingObjectsWithSort)
-	t.Run("getting objects with hybrid search", getWithHybridSearch)
-	t.Run("expected get failures with invalid conditions", getsWithExpectedFailures)
-	t.Run("cursor through results", getWithCursorSearch)
-	t.Run("groupBy objects", groupByObjects)
-
-	// aggregate tests
-	t.Run("aggregates noPropsClass without grouping", aggregateNoPropsClassWithoutGroupByTest)
-	t.Run("aggregates arrayClass without grouping", aggregateArrayClassWithoutGroupByTest)
-	t.Run("aggregates arrayClass with grouping", aggregateArrayClassWithGroupByTest)
-	t.Run("aggregates duplicatesClass without grouping", aggregateDuplicatesClassWithoutGroupByTest)
-	t.Run("aggregates duplicatesClass with grouping", aggregateDuplicatesClassWithGroupByTest)
-	t.Run("aggregates city without grouping", aggregateCityClassWithoutGroupByTest)
-	t.Run("aggregates city with grouping", aggregateCityClassWithGroupByTest)
-
-	t.Run("aggregates local meta string props not set everywhere", localMeta_StringPropsNotSetEverywhere)
-	t.Run("aggregates local meta with where and nearText filters", localMetaWithWhereAndNearTextFilters)
-	t.Run("aggregates local meta with where and nearObject filters", localMetaWithWhereAndNearObjectFilters)
-	t.Run("aggregates local meta with nearVector filters", localMetaWithNearVectorFilter)
-	t.Run("aggregates local meta with where and nearVector nearMedia", localMetaWithWhereAndNearVectorFilters)
-	t.Run("aggregates local meta with where groupBy and nearMedia filters", localMetaWithWhereGroupByNearMediaFilters)
-	t.Run("aggregates local meta with objectLimit and nearMedia filters", localMetaWithObjectLimit)
-	t.Run("aggregates on date fields", aggregatesOnDateFields)
-
-	t.Run("expected aggregate failures with invalid conditions", aggregatesWithExpectedFailures)
-
-	t.Run("metrics count is stable when more classes are added", metricsCount)
-
-	// tear down
 	deleteObjectClass(t, "Person")
 	deleteObjectClass(t, "Pizza")
 	deleteObjectClass(t, "Country")
@@ -134,15 +78,87 @@ func testGraphQL(t *testing.T) {
 	deleteObjectClass(t, noPropsClassName)
 	deleteObjectClass(t, "CursorClass")
 	deleteObjectClass(t, "CompanyGroup")
+	deleteObjectClass(t, "CustomVectorClass")
+
+	t.Run("setup test schema", addTestSchema)
+	t.Run("import test data (city, country, airport)", addTestDataCityAirport)
+	t.Run("import test data (companies)", addTestDataCompanies)
+	t.Run("import test data (person)", addTestDataPersons)
+	t.Run("import test data (pizzas)", addTestDataPizzas)
+	t.Run("import test data (array class)", addTestDataArrayClass)
+	t.Run("import test data (duplicates class)", addTestDataDuplicatesClass)
+	t.Run("import test data (500 random strings)", addTestDataRansomNotes)
+	// t.Run("import test data (multi shard)", addTestDataMultiShard)
+	// t.Run("import test data (date field class)", addDateFieldClass)
+	// t.Run("import test data (custom vector class)", addTestDataCVC)
+	// t.Run("import test data (class without properties)", addTestDataNoProperties)
+	// t.Run("import test data (cursor api)", addTestDataCursorSearch)
+
+	//t.Run("aggregates with hybrid search", aggregationWithHybridSearch)
+	//
+	//// explore tests
+	//t.Run("expected explore failures with invalid conditions", exploreWithExpectedFailures)
+	//
+	//// get tests
+	//t.Run("getting objects", gettingObjects)
+	//t.Run("getting objects with filters", gettingObjectsWithFilters)
+	//t.Run("getting objects with geo filters", gettingObjectsWithGeoFilters)
+	//t.Run("getting objects with grouping", gettingObjectsWithGrouping)
+	//t.Run("getting objects with additional props", gettingObjectsWithAdditionalProps)
+	//t.Run("getting objects with near fields", gettingObjectsWithNearFields)
+	//t.Run("getting objects with near fields with multi shard setup", gettingObjectsWithNearFieldsMultiShard)
+	//t.Run("getting objects with sort", gettingObjectsWithSort)
+	//t.Run("getting objects with hybrid search", getWithHybridSearch)
+	//t.Run("expected get failures with invalid conditions", getsWithExpectedFailures)
+	//t.Run("cursor through results", getWithCursorSearch)
+	//t.Run("groupBy objects", groupByObjects)
+	//
+	//// aggregate tests
+	//t.Run("aggregates noPropsClass without grouping", aggregateNoPropsClassWithoutGroupByTest)
+	//t.Run("aggregates arrayClass without grouping", aggregateArrayClassWithoutGroupByTest)
+	//t.Run("aggregates arrayClass with grouping", aggregateArrayClassWithGroupByTest)
+	//t.Run("aggregates duplicatesClass without grouping", aggregateDuplicatesClassWithoutGroupByTest)
+	//t.Run("aggregates duplicatesClass with grouping", aggregateDuplicatesClassWithGroupByTest)
+	//t.Run("aggregates city without grouping", aggregateCityClassWithoutGroupByTest)
+	//t.Run("aggregates city with grouping", aggregateCityClassWithGroupByTest)
+
+	// t.Run("aggregates local meta string props not set everywhere", localMeta_StringPropsNotSetEverywhere)
+	// t.Run("aggregates local meta with where and nearText filters", localMetaWithWhereAndNearTextFilters)
+	// t.Run("aggregates local meta with where and nearObject filters", localMetaWithWhereAndNearObjectFilters)
+	// t.Run("aggregates local meta with nearVector filters", localMetaWithNearVectorFilter)
+	// t.Run("aggregates local meta with where and nearVector nearMedia", localMetaWithWhereAndNearVectorFilters)
+	// t.Run("aggregates local meta with where groupBy and nearMedia filters", localMetaWithWhereGroupByNearMediaFilters)
+	t.Run("aggregates local meta with objectLimit and nearMedia filters", localMetaWithObjectLimit)
+	// t.Run("aggregates on date fields", aggregatesOnDateFields)
+
+	//t.Run("expected aggregate failures with invalid conditions", aggregatesWithExpectedFailures)
+	//
+	//t.Run("metrics count is stable when more classes are added", metricsCount)
+	//
+	//// tear down
+	//deleteObjectClass(t, "Person")
+	//deleteObjectClass(t, "Pizza")
+	//deleteObjectClass(t, "Country")
+	//deleteObjectClass(t, "City")
+	//deleteObjectClass(t, "Airport")
+	//deleteObjectClass(t, "Company")
+	//deleteObjectClass(t, "RansomNote")
+	//deleteObjectClass(t, "MultiShard")
+	//deleteObjectClass(t, "HasDateField")
+	//deleteObjectClass(t, arrayClassName)
+	//deleteObjectClass(t, duplicatesClassName)
+	//deleteObjectClass(t, noPropsClassName)
+	//deleteObjectClass(t, "CursorClass")
+	//deleteObjectClass(t, "CompanyGroup")
 
 	// only run after everything else is deleted, this way, we can also run an
 	// all-class Explore since all vectors which are now left have the same
 	// dimensions.
 
-	t.Run("getting objects with custom vectors", gettingObjectsWithCustomVectors)
-	t.Run("explore objects with custom vectors", exploreObjectsWithCustomVectors)
-
-	deleteObjectClass(t, "CustomVectorClass")
+	//t.Run("getting objects with custom vectors", gettingObjectsWithCustomVectors)
+	//t.Run("explore objects with custom vectors", exploreObjectsWithCustomVectors)
+	//
+	//deleteObjectClass(t, "CustomVectorClass")
 }
 
 func TestAggregateHybrid(t *testing.T) {

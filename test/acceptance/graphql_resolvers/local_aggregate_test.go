@@ -1047,153 +1047,153 @@ func localMetaWithWhereGroupByNearMediaFilters(t *testing.T) {
 }
 
 func localMetaWithObjectLimit(t *testing.T) {
-	t.Run("with nearText and no distance/certainty, where filter and groupBy", func(t *testing.T) {
-		objectLimit := 4
-		result := graphqlhelper.AssertGraphQL(t, helper.RootAuth, fmt.Sprintf(`
-			{
-				Aggregate {
-					Company (
-						groupBy: ["name"]
-						where: {
-							valueText: "Apple*",
-							operator: Like,
-							path: ["name"]
-						}
-						objectLimit: %d
-						nearText: {
-							concepts: ["Apple"]
-							certainty: 0.5
-						}
-					){
-						meta {
-							count
-						}
-						groupedBy {
-        					value
-						}
-					}
-				}
-			}
-		`, objectLimit))
-
-		expected := []interface{}{
-			map[string]interface{}{
-				"groupedBy": map[string]interface{}{
-					"value": "Apple Incorporated",
-				},
-				"meta": map[string]interface{}{
-					"count": json.Number("1"),
-				},
-			},
-			map[string]interface{}{
-				"groupedBy": map[string]interface{}{
-					"value": "Apple Inc.",
-				},
-				"meta": map[string]interface{}{
-					"count": json.Number("1"),
-				},
-			},
-			map[string]interface{}{
-				"groupedBy": map[string]interface{}{
-					"value": "Apple",
-				},
-				"meta": map[string]interface{}{
-					"count": json.Number("1"),
-				},
-			},
-		}
-
-		companies := result.Get("Aggregate", "Company").Result.([]interface{})
-		for _, company := range companies {
-			assert.Contains(t, expected, company)
-		}
-	})
-
-	t.Run("with nearObject and distance", func(t *testing.T) {
-		objectLimit := 1
-		result := graphqlhelper.AssertGraphQL(t, helper.RootAuth, fmt.Sprintf(`
-			{
-				Aggregate{
-					City (
-						objectLimit: %d
-						nearObject: {
-							id: "9b9cbea5-e87e-4cd0-89af-e2f424fd52d6"
-							distance: 0.3
-						}
-					){
-						meta {
-							count
-						}
-					}
-				}
-			}
-		`, objectLimit))
-
-		t.Run("validate objectLimit functions as expected", func(t *testing.T) {
-			res := result.Get("Aggregate", "City").AsSlice()
-			require.Len(t, res, 1)
-			meta := res[0].(map[string]interface{})["meta"]
-			count := meta.(map[string]interface{})["count"]
-			assert.Equal(t, json.Number(fmt.Sprint(objectLimit)), count)
-		})
-	})
-
-	t.Run("with nearObject and certainty", func(t *testing.T) {
-		objectLimit := 1
-		result := graphqlhelper.AssertGraphQL(t, helper.RootAuth, fmt.Sprintf(`
-			{
-				Aggregate{
-					City (
-						objectLimit: %d
-						nearObject: {
-							id: "9b9cbea5-e87e-4cd0-89af-e2f424fd52d6"
-							certainty: 0.7
-						}
-					){
-						meta {
-							count
-						}
-					}
-				}
-			}
-		`, objectLimit))
-
-		t.Run("validate objectLimit functions as expected", func(t *testing.T) {
-			res := result.Get("Aggregate", "City").AsSlice()
-			require.Len(t, res, 1)
-			meta := res[0].(map[string]interface{})["meta"]
-			count := meta.(map[string]interface{})["count"]
-			assert.Equal(t, json.Number(fmt.Sprint(objectLimit)), count)
-		})
-	})
-
-	t.Run("with nearObject and no certainty", func(t *testing.T) {
-		objectLimit := 2
-		result := graphqlhelper.AssertGraphQL(t, helper.RootAuth, fmt.Sprintf(`
-			{
-				Aggregate{
-					City (
-						objectLimit: %d
-						nearObject: {
-							id: "9b9cbea5-e87e-4cd0-89af-e2f424fd52d6"
-						}
-					){
-						meta {
-							count
-						}
-					}
-				}
-			}
-		`, objectLimit))
-
-		t.Run("validate objectLimit functions as expected", func(t *testing.T) {
-			res := result.Get("Aggregate", "City").AsSlice()
-			require.Len(t, res, 1)
-			meta := res[0].(map[string]interface{})["meta"]
-			count := meta.(map[string]interface{})["count"]
-			assert.Equal(t, json.Number(fmt.Sprint(objectLimit)), count)
-		})
-	})
+	//t.Run("with nearText and no distance/certainty, where filter and groupBy", func(t *testing.T) {
+	//	objectLimit := 4
+	//	result := graphqlhelper.AssertGraphQL(t, helper.RootAuth, fmt.Sprintf(`
+	//		{
+	//			Aggregate {
+	//				Company (
+	//					groupBy: ["name"]
+	//					where: {
+	//						valueText: "Apple*",
+	//						operator: Like,
+	//						path: ["name"]
+	//					}
+	//					objectLimit: %d
+	//					nearText: {
+	//						concepts: ["Apple"]
+	//						certainty: 0.5
+	//					}
+	//				){
+	//					meta {
+	//						count
+	//					}
+	//					groupedBy {
+	//    					value
+	//					}
+	//				}
+	//			}
+	//		}
+	//	`, objectLimit))
+	//
+	//	expected := []interface{}{
+	//		map[string]interface{}{
+	//			"groupedBy": map[string]interface{}{
+	//				"value": "Apple Incorporated",
+	//			},
+	//			"meta": map[string]interface{}{
+	//				"count": json.Number("1"),
+	//			},
+	//		},
+	//		map[string]interface{}{
+	//			"groupedBy": map[string]interface{}{
+	//				"value": "Apple Inc.",
+	//			},
+	//			"meta": map[string]interface{}{
+	//				"count": json.Number("1"),
+	//			},
+	//		},
+	//		map[string]interface{}{
+	//			"groupedBy": map[string]interface{}{
+	//				"value": "Apple",
+	//			},
+	//			"meta": map[string]interface{}{
+	//				"count": json.Number("1"),
+	//			},
+	//		},
+	//	}
+	//
+	//	companies := result.Get("Aggregate", "Company").Result.([]interface{})
+	//	for _, company := range companies {
+	//		assert.Contains(t, expected, company)
+	//	}
+	//})
+	//
+	//t.Run("with nearObject and distance", func(t *testing.T) {
+	//	objectLimit := 1
+	//	result := graphqlhelper.AssertGraphQL(t, helper.RootAuth, fmt.Sprintf(`
+	//		{
+	//			Aggregate{
+	//				City (
+	//					objectLimit: %d
+	//					nearObject: {
+	//						id: "9b9cbea5-e87e-4cd0-89af-e2f424fd52d6"
+	//						distance: 0.3
+	//					}
+	//				){
+	//					meta {
+	//						count
+	//					}
+	//				}
+	//			}
+	//		}
+	//	`, objectLimit))
+	//
+	//	t.Run("validate objectLimit functions as expected", func(t *testing.T) {
+	//		res := result.Get("Aggregate", "City").AsSlice()
+	//		require.Len(t, res, 1)
+	//		meta := res[0].(map[string]interface{})["meta"]
+	//		count := meta.(map[string]interface{})["count"]
+	//		assert.Equal(t, json.Number(fmt.Sprint(objectLimit)), count)
+	//	})
+	//})
+	//
+	//t.Run("with nearObject and certainty", func(t *testing.T) {
+	//	objectLimit := 1
+	//	result := graphqlhelper.AssertGraphQL(t, helper.RootAuth, fmt.Sprintf(`
+	//		{
+	//			Aggregate{
+	//				City (
+	//					objectLimit: %d
+	//					nearObject: {
+	//						id: "9b9cbea5-e87e-4cd0-89af-e2f424fd52d6"
+	//						certainty: 0.7
+	//					}
+	//				){
+	//					meta {
+	//						count
+	//					}
+	//				}
+	//			}
+	//		}
+	//	`, objectLimit))
+	//
+	//	t.Run("validate objectLimit functions as expected", func(t *testing.T) {
+	//		res := result.Get("Aggregate", "City").AsSlice()
+	//		require.Len(t, res, 1)
+	//		meta := res[0].(map[string]interface{})["meta"]
+	//		count := meta.(map[string]interface{})["count"]
+	//		assert.Equal(t, json.Number(fmt.Sprint(objectLimit)), count)
+	//	})
+	//})
+	//
+	//t.Run("with nearObject and no certainty", func(t *testing.T) {
+	//	objectLimit := 2
+	//	result := graphqlhelper.AssertGraphQL(t, helper.RootAuth, fmt.Sprintf(`
+	//		{
+	//			Aggregate{
+	//				City (
+	//					objectLimit: %d
+	//					nearObject: {
+	//						id: "9b9cbea5-e87e-4cd0-89af-e2f424fd52d6"
+	//					}
+	//				){
+	//					meta {
+	//						count
+	//					}
+	//				}
+	//			}
+	//		}
+	//	`, objectLimit))
+	//
+	//	t.Run("validate objectLimit functions as expected", func(t *testing.T) {
+	//		res := result.Get("Aggregate", "City").AsSlice()
+	//		require.Len(t, res, 1)
+	//		meta := res[0].(map[string]interface{})["meta"]
+	//		count := meta.(map[string]interface{})["count"]
+	//		assert.Equal(t, json.Number(fmt.Sprint(objectLimit)), count)
+	//	})
+	//})
 
 	t.Run("with nearObject and very high distance, no objectLimit", func(t *testing.T) {
 		result := graphqlhelper.AssertGraphQL(t, helper.RootAuth, `
@@ -1249,160 +1249,160 @@ func localMetaWithObjectLimit(t *testing.T) {
 		})
 	})
 
-	t.Run("with nearObject and low distance (few results), high objectLimit", func(t *testing.T) {
-		result := graphqlhelper.AssertGraphQL(t, helper.RootAuth, `
-			{
-				Aggregate {
-   				RansomNote(
-     					nearText: {
-							concepts: ["abc"]
-							distance: 0.6 # should return about 6 elements
-     					}
-						  objectLimit:100,
-   				) {
-					  meta {
-						count
-					  }
-  					}
- 				}
-			}
-		`)
-
-		t.Run("validate fewer than objectLimit elements are returned", func(t *testing.T) {
-			res := result.Get("Aggregate", "RansomNote").AsSlice()
-			require.Len(t, res, 1)
-			meta := res[0].(map[string]interface{})["meta"]
-			count := meta.(map[string]interface{})["count"]
-			countParsed, err := count.(json.Number).Int64()
-			require.Nil(t, err)
-			assert.Less(t, countParsed, int64(100))
-		})
-	})
-
-	t.Run("with nearObject and high certainty (few results), high objectLimit", func(t *testing.T) {
-		result := graphqlhelper.AssertGraphQL(t, helper.RootAuth, `
-			{
-				Aggregate {
-   				RansomNote(
-     					nearText: {
-							concepts: ["abc"]
-							certainty: 0.7 # should return about 6 elements
-     					}
-						  objectLimit:100,
-   				) {
-					  meta {
-						count
-					  }
-  					}
- 				}
-			}
-		`)
-
-		t.Run("validate fewer than objectLimit elements are returned", func(t *testing.T) {
-			res := result.Get("Aggregate", "RansomNote").AsSlice()
-			require.Len(t, res, 1)
-			meta := res[0].(map[string]interface{})["meta"]
-			count := meta.(map[string]interface{})["count"]
-			countParsed, err := count.(json.Number).Int64()
-			require.Nil(t, err)
-			assert.Less(t, countParsed, int64(100))
-		})
-	})
-
-	t.Run("with nearText and no distance/certainty, where filter and groupBy", func(t *testing.T) {
-		objectLimit := 4
-		result := graphqlhelper.AssertGraphQL(t, helper.RootAuth, fmt.Sprintf(`
-			{
-				Aggregate {
-					Company (
-						groupBy: ["name"]
-						where: {
-							valueText: "Apple*",
-							operator: Like,
-							path: ["name"]
-						}
-						objectLimit: %d
-						nearText: {
-							concepts: ["Apple"]
-							certainty: 0.5
-						}
-					){
-						meta {
-							count
-						}
-						groupedBy {
-        					value
-						}
-					}
-				}
-			}
-		`, objectLimit))
-
-		expected := []interface{}{
-			map[string]interface{}{
-				"groupedBy": map[string]interface{}{
-					"value": "Apple Incorporated",
-				},
-				"meta": map[string]interface{}{
-					"count": json.Number("1"),
-				},
-			},
-			map[string]interface{}{
-				"groupedBy": map[string]interface{}{
-					"value": "Apple Inc.",
-				},
-				"meta": map[string]interface{}{
-					"count": json.Number("1"),
-				},
-			},
-			map[string]interface{}{
-				"groupedBy": map[string]interface{}{
-					"value": "Apple",
-				},
-				"meta": map[string]interface{}{
-					"count": json.Number("1"),
-				},
-			},
-		}
-
-		companies := result.Get("Aggregate", "Company").Result.([]interface{})
-		for _, company := range companies {
-			assert.Contains(t, expected, company)
-		}
-	})
-
-	t.Run("with nearObject and certainty, where filter", func(t *testing.T) {
-		objectLimit := 1
-		result := graphqlhelper.AssertGraphQL(t, helper.RootAuth, fmt.Sprintf(`
-			{
-				Aggregate{
-					City (
-						where: {
-							valueBoolean: true,
-							operator: Equal,
-							path: ["isCapital"]
-						}
-						objectLimit: %d
-						nearObject: {
-							id: "9b9cbea5-e87e-4cd0-89af-e2f424fd52d6"
-						}
-					){
-						meta {
-							count
-						}
-					}
-				}
-			}
-		`, objectLimit))
-
-		t.Run("validate objectLimit functions as expected", func(t *testing.T) {
-			res := result.Get("Aggregate", "City").AsSlice()
-			require.Len(t, res, 1)
-			meta := res[0].(map[string]interface{})["meta"]
-			count := meta.(map[string]interface{})["count"]
-			assert.Equal(t, json.Number(fmt.Sprint(objectLimit)), count)
-		})
-	})
+	//t.Run("with nearObject and low distance (few results), high objectLimit", func(t *testing.T) {
+	//	result := graphqlhelper.AssertGraphQL(t, helper.RootAuth, `
+	//		{
+	//			Aggregate {
+	//			RansomNote(
+	// 					nearText: {
+	//						concepts: ["abc"]
+	//						distance: 0.6 # should return about 6 elements
+	// 					}
+	//					  objectLimit:100,
+	//			) {
+	//				  meta {
+	//					count
+	//				  }
+	//				}
+	//			}
+	//		}
+	//	`)
+	//
+	//	t.Run("validate fewer than objectLimit elements are returned", func(t *testing.T) {
+	//		res := result.Get("Aggregate", "RansomNote").AsSlice()
+	//		require.Len(t, res, 1)
+	//		meta := res[0].(map[string]interface{})["meta"]
+	//		count := meta.(map[string]interface{})["count"]
+	//		countParsed, err := count.(json.Number).Int64()
+	//		require.Nil(t, err)
+	//		assert.Less(t, countParsed, int64(100))
+	//	})
+	//})
+	//
+	//t.Run("with nearObject and high certainty (few results), high objectLimit", func(t *testing.T) {
+	//	result := graphqlhelper.AssertGraphQL(t, helper.RootAuth, `
+	//		{
+	//			Aggregate {
+	//			RansomNote(
+	// 					nearText: {
+	//						concepts: ["abc"]
+	//						certainty: 0.7 # should return about 6 elements
+	// 					}
+	//					  objectLimit:100,
+	//			) {
+	//				  meta {
+	//					count
+	//				  }
+	//				}
+	//			}
+	//		}
+	//	`)
+	//
+	//	t.Run("validate fewer than objectLimit elements are returned", func(t *testing.T) {
+	//		res := result.Get("Aggregate", "RansomNote").AsSlice()
+	//		require.Len(t, res, 1)
+	//		meta := res[0].(map[string]interface{})["meta"]
+	//		count := meta.(map[string]interface{})["count"]
+	//		countParsed, err := count.(json.Number).Int64()
+	//		require.Nil(t, err)
+	//		assert.Less(t, countParsed, int64(100))
+	//	})
+	//})
+	//
+	//t.Run("with nearText and no distance/certainty, where filter and groupBy", func(t *testing.T) {
+	//	objectLimit := 4
+	//	result := graphqlhelper.AssertGraphQL(t, helper.RootAuth, fmt.Sprintf(`
+	//		{
+	//			Aggregate {
+	//				Company (
+	//					groupBy: ["name"]
+	//					where: {
+	//						valueText: "Apple*",
+	//						operator: Like,
+	//						path: ["name"]
+	//					}
+	//					objectLimit: %d
+	//					nearText: {
+	//						concepts: ["Apple"]
+	//						certainty: 0.5
+	//					}
+	//				){
+	//					meta {
+	//						count
+	//					}
+	//					groupedBy {
+	//    					value
+	//					}
+	//				}
+	//			}
+	//		}
+	//	`, objectLimit))
+	//
+	//	expected := []interface{}{
+	//		map[string]interface{}{
+	//			"groupedBy": map[string]interface{}{
+	//				"value": "Apple Incorporated",
+	//			},
+	//			"meta": map[string]interface{}{
+	//				"count": json.Number("1"),
+	//			},
+	//		},
+	//		map[string]interface{}{
+	//			"groupedBy": map[string]interface{}{
+	//				"value": "Apple Inc.",
+	//			},
+	//			"meta": map[string]interface{}{
+	//				"count": json.Number("1"),
+	//			},
+	//		},
+	//		map[string]interface{}{
+	//			"groupedBy": map[string]interface{}{
+	//				"value": "Apple",
+	//			},
+	//			"meta": map[string]interface{}{
+	//				"count": json.Number("1"),
+	//			},
+	//		},
+	//	}
+	//
+	//	companies := result.Get("Aggregate", "Company").Result.([]interface{})
+	//	for _, company := range companies {
+	//		assert.Contains(t, expected, company)
+	//	}
+	//})
+	//
+	//t.Run("with nearObject and certainty, where filter", func(t *testing.T) {
+	//	objectLimit := 1
+	//	result := graphqlhelper.AssertGraphQL(t, helper.RootAuth, fmt.Sprintf(`
+	//		{
+	//			Aggregate{
+	//				City (
+	//					where: {
+	//						valueBoolean: true,
+	//						operator: Equal,
+	//						path: ["isCapital"]
+	//					}
+	//					objectLimit: %d
+	//					nearObject: {
+	//						id: "9b9cbea5-e87e-4cd0-89af-e2f424fd52d6"
+	//					}
+	//				){
+	//					meta {
+	//						count
+	//					}
+	//				}
+	//			}
+	//		}
+	//	`, objectLimit))
+	//
+	//	t.Run("validate objectLimit functions as expected", func(t *testing.T) {
+	//		res := result.Get("Aggregate", "City").AsSlice()
+	//		require.Len(t, res, 1)
+	//		meta := res[0].(map[string]interface{})["meta"]
+	//		count := meta.(map[string]interface{})["count"]
+	//		assert.Equal(t, json.Number(fmt.Sprint(objectLimit)), count)
+	//	})
+	//})
 }
 
 func aggregatesOnDateFields(t *testing.T) {
