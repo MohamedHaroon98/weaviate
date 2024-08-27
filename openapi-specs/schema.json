@@ -1,9 +1,5 @@
 {
-  "servers": [
-      {
-        "url": "http://localhost:8080/v1"
-      }
-  ],
+  "host": "http://localhost:8080/v1",
   "basePath": "/v1",
   "consumes": [
     "application/json"
