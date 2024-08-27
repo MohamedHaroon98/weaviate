@@ -1,5 +1,5 @@
 {
-  "host": "<YOUR_HOST>:<YOUR_PORT>",
+  "host": "localhost:8080",
   "basePath": "/v1",
   "consumes": [
     "application/json"
