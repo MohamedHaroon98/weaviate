@@ -537,3 +537,30 @@ func fileExists(path string) (bool, error) {
 
 	return false, err
 }
+
+// not thread-safe on its own, as the assumption is that this is called from a
+// lockholder
+func (sg *SegmentGroup) hasWithLowerSegmentBoundary(key []byte, lowestSegmentExc int) (bool, error) {
+	if !IsExpectedStrategy(sg.strategy, StrategyReplace) {
+		return false, fmt.Errorf("has only possible for strategy %q", StrategyReplace)
+	}
+
+	for i := len(sg.segments) - 1; i > lowestSegmentExc; i-- {
+		has, err := sg.segments[i].has(key)
+		if err != nil {
+			return false, err
+		}
+		if has {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+type hasOnUpperSegmentsFn func(key []byte) (bool, error)
+
+func (sg *SegmentGroup) makeHasOnUpperSegments(lowestSegmentExc int) hasOnUpperSegmentsFn {
+	return func(key []byte) (bool, error) {
+		return sg.hasWithLowerSegmentBoundary(key, lowestSegmentExc)
+	}
+}
