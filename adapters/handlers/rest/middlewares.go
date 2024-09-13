@@ -130,13 +130,14 @@ func makeSetupGlobalMiddleware(appState *state.State) func(http.Handler) http.Ha
 		handler = addInjectHeadersIntoContext(handler)
 		handler = makeCatchPanics(appState.Logger, newPanicsRequestsTotal(appState.Metrics, appState.Logger))(handler)
 
-		enforcer, err := initializeCasbin()
+		apiKeyConfig := appState.ServerConfig.Config.Authentication.APIKey
+		enforcer, err := initializeCasbin(apiKeyConfig)
 		if err != nil {
 			log.Fatalf("Failed to initialize Casbin: %v", err)
 		}
 
 		// Create a new middleware for Casbin authorization
-		authMiddleware := CasbinMiddleware(enforcer)
+		authMiddleware := CasbinMiddleware(enforcer, apiKeyConfig)
 		handler = authMiddleware(handler)
 		// Must be the last middleware as it might skip the next handler
 		handler = addClusterHandlerMiddleware(handler, appState)
