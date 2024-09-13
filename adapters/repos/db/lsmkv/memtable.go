@@ -89,6 +89,25 @@ func (m *Memtable) get(key []byte) ([]byte, error) {
 	return v, nil
 }
 
+func (m *Memtable) has(key []byte) (bool, error) {
+	if !IsExpectedStrategy(m.strategy, StrategyReplace) {
+		return false, errors.Errorf("has only possible with strategy 'replace'")
+	}
+
+	m.RLock()
+	defer m.RUnlock()
+
+	_, err := m.key.get(key)
+
+	if err == nil || errors.Is(err, lsmkv.Deleted) {
+		return true, nil
+	}
+	if errors.Is(err, lsmkv.NotFound) {
+		return false, nil
+	}
+	return false, err
+}
+
 func (m *Memtable) getBySecondary(pos int, key []byte) ([]byte, error) {
 	start := time.Now()
 	defer m.metrics.getBySecondary(start.UnixNano())
