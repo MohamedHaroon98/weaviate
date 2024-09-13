@@ -14,6 +14,7 @@ package rest
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"regexp"
 	"strings"
@@ -128,6 +129,15 @@ func makeSetupGlobalMiddleware(appState *state.State) func(http.Handler) http.Ha
 		handler = makeAddModuleHandlers(appState.Modules)(handler)
 		handler = addInjectHeadersIntoContext(handler)
 		handler = makeCatchPanics(appState.Logger, newPanicsRequestsTotal(appState.Metrics, appState.Logger))(handler)
+
+		enforcer, err := initializeCasbin()
+		if err != nil {
+			log.Fatalf("Failed to initialize Casbin: %v", err)
+		}
+
+		// Create a new middleware for Casbin authorization
+		authMiddleware := CasbinMiddleware(enforcer)
+		handler = authMiddleware(handler)
 		// Must be the last middleware as it might skip the next handler
 		handler = addClusterHandlerMiddleware(handler, appState)
 		if appState.ServerConfig.Config.Sentry.Enabled {
