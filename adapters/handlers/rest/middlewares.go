@@ -130,7 +130,10 @@ func makeSetupGlobalMiddleware(appState *state.State) func(http.Handler) http.Ha
 		handler = makeCatchPanics(appState.Logger, newPanicsRequestsTotal(appState.Metrics, appState.Logger))(handler)
 
 		// Create a new middleware for RBAC Authz
-		handler = rbacMiddleware(appState)(handler)
+		if appState.RBACEnforcer != nil {
+			handler = rbacMiddleware(appState)(handler)
+		}
+
 		// Must be the last middleware as it might skip the next handler
 		handler = addClusterHandlerMiddleware(handler, appState)
 		if appState.ServerConfig.Config.Sentry.Enabled {
