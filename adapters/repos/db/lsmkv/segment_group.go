@@ -557,9 +557,9 @@ func (sg *SegmentGroup) hasWithLowerSegmentBoundary(key []byte, lowestSegmentExc
 	return false, nil
 }
 
-type hasOnUpperSegmentsFn func(key []byte) (bool, error)
+type keyExistsOnUpperSegmentsFn func(key []byte) (bool, error)
 
-func (sg *SegmentGroup) makeHasOnUpperSegments(lowestSegmentExc int) hasOnUpperSegmentsFn {
+func (sg *SegmentGroup) makeHasOnUpperSegments(lowestSegmentExc int) keyExistsOnUpperSegmentsFn {
 	return func(key []byte) (bool, error) {
 		return sg.hasWithLowerSegmentBoundary(key, lowestSegmentExc)
 	}
