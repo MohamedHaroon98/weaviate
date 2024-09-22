@@ -259,8 +259,9 @@ func newSegmentGroup(logger logrus.FieldLogger, metrics *Metrics,
 		sg.metrics.ObjectCount(sg.count())
 	}
 
+	// TODO AL: use separate cycle callback for cleanup?
 	id := "segmentgroup/compaction/" + sg.dir
-	sg.compactionCallbackCtrl = compactionCallbacks.Register(id, sg.compactIfLevelsMatch)
+	sg.compactionCallbackCtrl = compactionCallbacks.Register(id, sg.compactOrCleanup)
 
 	return sg, nil
 }
@@ -536,4 +537,43 @@ func fileExists(path string) (bool, error) {
 	}
 
 	return false, err
+}
+
+func (sg *SegmentGroup) compactOrCleanup(shouldAbort cyclemanager.ShouldAbortCallback) bool {
+	sg.monitorSegments()
+
+	if compacted, err := sg.compactOnce(); err != nil {
+		sg.logger.WithField("action", "lsm_compaction").
+			WithField("path", sg.dir).
+			WithError(err).
+			Errorf("compaction failed")
+	} else if !compacted {
+		sg.logger.WithField("action", "lsm_compaction").
+			WithField("path", sg.dir).
+			Trace("no segments eligible for compaction")
+	} else {
+		return true
+	}
+
+	if cleaned, err := sg.cleanupOnce(shouldAbort); err != nil {
+		sg.logger.WithField("action", "lsm_cleanup").
+			WithField("path", sg.dir).
+			WithError(err).
+			Errorf("cleanup failed")
+	} else if !cleaned {
+		sg.logger.WithField("action", "lsm_cleanup").
+			WithField("path", sg.dir).
+			Trace("no segments eligible for cleanup")
+	} else {
+		return true
+	}
+
+	return false
+}
+
+func (sg *SegmentGroup) Len() int {
+	sg.maintenanceLock.RLock()
+	defer sg.maintenanceLock.RUnlock()
+
+	return len(sg.segments)
 }

@@ -16,9 +16,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/weaviate/weaviate/adapters/repos/db/lsmkv/segmentindex"
+	"github.com/weaviate/weaviate/entities/cyclemanager"
 )
 
 type keyExistsOnUpperSegmentsFn func(key []byte) (bool, error)
@@ -42,9 +42,11 @@ func (sg *SegmentGroup) makeKeyExistsOnUpperSegments(segmentIdx int) keyExistsOn
 	}
 }
 
-func (sg *SegmentGroup) cleanupOnce() (bool, error) {
-	candidatePos := sg.findCleanupCandidate()
-	if candidatePos == -1 {
+func (sg *SegmentGroup) cleanupOnce(shouldAbort cyclemanager.ShouldAbortCallback) (bool, error) {
+	// TODO AL: take shouldAbort into account
+
+	segmentIdx := sg.findCleanupCandidate()
+	if segmentIdx == -1 {
 		return false, nil
 	}
 
@@ -68,24 +70,29 @@ func (sg *SegmentGroup) cleanupOnce() (bool, error) {
 		}
 	}
 
-	segment := sg.segmentAtPos(candidatePos)
+	segment := sg.segmentAtPos(segmentIdx)
 
-	tmpPath := filepath.Join(sg.dir, "segment-"+segmentID(segment.path)+".db.tmp")
+	tmpSegmentPath := filepath.Join(sg.dir, "segment-"+segmentID(segment.path)+".db.tmp")
 	scratchSpacePath := segment.path + "cleanup.scratch.d"
 
-	file, err := os.Create(tmpPath)
+	file, err := os.Create(tmpSegmentPath)
 	if err != nil {
 		return false, err
 	}
 
 	switch segment.strategy {
 	case segmentindex.StrategyReplace:
-	// TODO
+		c := newSegmentCleanerReplace(file, segment.newCursor(),
+			sg.makeKeyExistsOnUpperSegments(segmentIdx), segment.level,
+			segment.secondaryIndexCount, scratchSpacePath)
+		if err := c.do(); err != nil {
+			return false, err
+		}
 
 	case segmentindex.StrategySetCollection,
 		segmentindex.StrategyMapCollection,
 		segmentindex.StrategyRoaringSet:
-		// TODO. not supported yet
+		// TODO AL: add support in the future
 	default:
 		return false, fmt.Errorf("unrecognized strategy %v", segment.strategy)
 	}
@@ -93,12 +100,11 @@ func (sg *SegmentGroup) cleanupOnce() (bool, error) {
 	if err := file.Sync(); err != nil {
 		return false, fmt.Errorf("fsync cleaned segment file: %w", err)
 	}
-
 	if err := file.Close(); err != nil {
 		return false, fmt.Errorf("close cleaned segment file: %w", err)
 	}
 
-	if err := sg.replaceCleanedSegment(candidatePos, tmpPath); err != nil {
+	if err := sg.replaceCleanedSegment(segmentIdx, tmpSegmentPath); err != nil {
 		return false, fmt.Errorf("replace compacted segments: %w", err)
 	}
 
@@ -110,22 +116,17 @@ func (sg *SegmentGroup) findCleanupCandidate() int {
 		return -1
 	}
 
-	// TODO implement
+	// TODO AL: implement
 	return 0
 }
 
-func (sg *SegmentGroup) replaceCleanedSegment(pos int,
-	tmpPath string,
+func (sg *SegmentGroup) replaceCleanedSegment(segmentIdx int, tmpSegmentPath string,
 ) error {
-	sg.maintenanceLock.RLock()
-	updatedCountNetAdditions := sg.segments[old1].countNetAdditions +
-		sg.segments[old2].countNetAdditions
-	sg.maintenanceLock.RUnlock()
+	oldSegment := sg.segmentAtPos(segmentIdx)
+	countNetAdditions := oldSegment.countNetAdditions
 
-	// WIP: we could add a random suffix to the tmp file to avoid conflicts
-	precomputedFiles, err := preComputeSegmentMeta(tmpPath,
-		updatedCountNetAdditions, sg.logger,
-		sg.useBloomFilter, sg.calcCountNetAdditions)
+	precomputedFiles, err := preComputeSegmentMeta(tmpSegmentPath, countNetAdditions,
+		sg.logger, sg.useBloomFilter, sg.calcCountNetAdditions)
 	if err != nil {
 		return fmt.Errorf("precompute segment meta: %w", err)
 	}
@@ -133,58 +134,38 @@ func (sg *SegmentGroup) replaceCleanedSegment(pos int,
 	sg.maintenanceLock.Lock()
 	defer sg.maintenanceLock.Unlock()
 
-	leftSegment := sg.segments[old1]
-	rightSegment := sg.segments[old2]
-
-	if err := leftSegment.close(); err != nil {
-		return errors.Wrap(err, "close disk segment")
+	if err := oldSegment.close(); err != nil {
+		return fmt.Errorf("close disk segment %q: %w", oldSegment.path, err)
+	}
+	if err := oldSegment.drop(); err != nil {
+		return fmt.Errorf("drop disk segment %q: %w", oldSegment.path, err)
+	}
+	if err := fsync(sg.dir); err != nil {
+		return fmt.Errorf("fsync segment directory %q: %w", sg.dir, err)
 	}
 
-	if err := rightSegment.close(); err != nil {
-		return errors.Wrap(err, "close disk segment")
-	}
+	segmentId := segmentID(oldSegment.path)
+	var segmentPath string
 
-	if err := leftSegment.drop(); err != nil {
-		return errors.Wrap(err, "drop disk segment")
-	}
-
-	if err := rightSegment.drop(); err != nil {
-		return errors.Wrap(err, "drop disk segment")
-	}
-
-	err = fsync(sg.dir)
-	if err != nil {
-		return fmt.Errorf("fsync segment directory %s: %w", sg.dir, err)
-	}
-
-	sg.segments[old1] = nil
-	sg.segments[old2] = nil
-
-	var newPath string
-	// the old segments have been deleted, we can now safely remove the .tmp
-	// extension from the new segment itself and the pre-computed files which
-	// carried the name of the second old segment
-	for i, path := range precomputedFiles {
-		updated, err := sg.stripTmpExtension(path, segmentID(leftSegment.path), segmentID(rightSegment.path))
+	// the old segment have been deleted, we can now safely remove the .tmp
+	// extension from the new segment itself and the pre-computed files
+	for i, tmpPath := range precomputedFiles {
+		path, err := sg.stripTmpExtension(tmpPath, segmentId, segmentId)
 		if err != nil {
-			return errors.Wrap(err, "strip .tmp extension of new segment")
+			return fmt.Errorf("strip .tmp extension of new segment %q: %w", tmpPath, err)
 		}
-
 		if i == 0 {
 			// the first element in the list is the segment itself
-			newPath = updated
+			segmentPath = path
 		}
 	}
 
-	seg, err := newSegment(newPath, sg.logger, sg.metrics, nil,
+	newSegment, err := newSegment(segmentPath, sg.logger, sg.metrics, nil,
 		sg.mmapContents, sg.useBloomFilter, sg.calcCountNetAdditions, false)
 	if err != nil {
-		return errors.Wrap(err, "create new segment")
+		return fmt.Errorf("create new segment %q: %w", newSegment.path, err)
 	}
 
-	sg.segments[old2] = seg
-
-	sg.segments = append(sg.segments[:old1], sg.segments[old1+1:]...)
-
+	sg.segments[segmentIdx] = newSegment
 	return nil
 }
