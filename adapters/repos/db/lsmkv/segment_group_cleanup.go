@@ -17,7 +17,6 @@ import (
 	"path/filepath"
 
 	"github.com/sirupsen/logrus"
-	"github.com/weaviate/weaviate/adapters/repos/db/lsmkv/segmentindex"
 	"github.com/weaviate/weaviate/entities/cyclemanager"
 )
 
@@ -43,6 +42,17 @@ func (sg *SegmentGroup) makeKeyExistsOnUpperSegments(segmentIdx int) keyExistsOn
 }
 
 func (sg *SegmentGroup) cleanupOnce(shouldAbort cyclemanager.ShouldAbortCallback) (bool, error) {
+	// validate supported strategy
+	switch sg.strategy {
+	case StrategyReplace:
+		// supported, continue
+	case StrategySetCollection, StrategyMapCollection, StrategyRoaringSet:
+		// TODO AL: add support for other strategies in the future
+		return false, nil
+	default:
+		return false, fmt.Errorf("unrecognized strategy %q", sg.strategy)
+	}
+
 	// TODO AL: take shouldAbort into account
 
 	segmentIdx := sg.findCleanupCandidate()
@@ -80,21 +90,14 @@ func (sg *SegmentGroup) cleanupOnce(shouldAbort cyclemanager.ShouldAbortCallback
 		return false, err
 	}
 
-	switch segment.strategy {
-	case segmentindex.StrategyReplace:
+	switch sg.strategy {
+	case StrategyReplace:
 		c := newSegmentCleanerReplace(file, segment.newCursor(),
 			sg.makeKeyExistsOnUpperSegments(segmentIdx), segment.level,
 			segment.secondaryIndexCount, scratchSpacePath)
 		if err := c.do(); err != nil {
 			return false, err
 		}
-
-	case segmentindex.StrategySetCollection,
-		segmentindex.StrategyMapCollection,
-		segmentindex.StrategyRoaringSet:
-		// TODO AL: add support in the future
-	default:
-		return false, fmt.Errorf("unrecognized strategy %v", segment.strategy)
 	}
 
 	if err := file.Sync(); err != nil {
