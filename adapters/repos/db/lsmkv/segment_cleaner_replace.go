@@ -102,17 +102,22 @@ func (p *segmentCleanerReplace) writeKeys() ([]segmentindex.Key, error) {
 	for node, err = p.cursor.firstWithAllKeys(); err == nil || errors.Is(err, lsmkv.Deleted); node, err = p.cursor.nextWithAllKeys() {
 		keyExists, err = p.keyExistsFn(node.primaryKey)
 		if err != nil {
+			// fmt.Printf("  ==> loop key exists error %q\n", err)
 			break
 		}
+		// fmt.Printf("  ==> loop key exists [%v]\n", keyExists)
 		if keyExists {
 			continue
 		}
 		nodeCopy := node
 		nodeCopy.offset = offset
+		// fmt.Printf("  ==> node [%+v] node copy [%+v]\n", node, nodeCopy)
 		indexKey, err = nodeCopy.KeyIndexAndWriteTo(p.bufw)
 		if err != nil {
+			// fmt.Printf("  ==> loop indexkey error %q\n", err)
 			break
 		}
+		// fmt.Printf("  ==> indexkey [%v]\n", indexKey)
 		offset = indexKey.ValueEnd
 		indexKeys = append(indexKeys, indexKey)
 	}

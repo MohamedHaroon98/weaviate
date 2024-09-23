@@ -53,6 +53,8 @@ func (sg *SegmentGroup) cleanupOnce(shouldAbort cyclemanager.ShouldAbortCallback
 		return false, fmt.Errorf("unrecognized strategy %q", sg.strategy)
 	}
 
+	// fmt.Printf("  ==> cleanupOnce %q strategy %q\n", sg.dir, sg.strategy)
+
 	// TODO AL: take shouldAbort into account
 
 	segmentIdx := sg.findCleanupCandidate()
@@ -96,6 +98,8 @@ func (sg *SegmentGroup) cleanupOnce(shouldAbort cyclemanager.ShouldAbortCallback
 			sg.makeKeyExistsOnUpperSegments(segmentIdx), segment.level,
 			segment.secondaryIndexCount, scratchSpacePath)
 		if err := c.do(); err != nil {
+			// fmt.Printf("  ==> cleanup error %s\n\n", err)
+
 			return false, err
 		}
 	}
