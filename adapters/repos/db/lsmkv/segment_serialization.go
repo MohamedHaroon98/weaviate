@@ -49,12 +49,14 @@ func (s *segmentReplaceNode) KeyIndexAndWriteTo(w io.Writer) (segmentindex.Key, 
 	}
 
 	written += 9
+	// fmt.Printf("  ==> written tombstone + value len [%d]\n", 9)
 
 	n, err := w.Write(s.value)
 	if err != nil {
 		return out, errors.Wrapf(err, "write node value")
 	}
 	written += n
+	// fmt.Printf("  ==> written value [%d]\n", n)
 
 	keyLength := uint32(len(s.primaryKey))
 	binary.LittleEndian.PutUint32(buf[0:4], keyLength)
@@ -62,12 +64,14 @@ func (s *segmentReplaceNode) KeyIndexAndWriteTo(w io.Writer) (segmentindex.Key, 
 		return out, err
 	}
 	written += 4
+	// fmt.Printf("  ==> written key len [%d]\n", 4)
 
 	n, err = w.Write(s.primaryKey)
 	if err != nil {
 		return out, errors.Wrapf(err, "write node key")
 	}
 	written += n
+	// fmt.Printf("  ==> written key [%d]\n", n)
 
 	for j := 0; j < int(s.secondaryIndexCount); j++ {
 		var secondaryKeyLength uint32
@@ -81,6 +85,7 @@ func (s *segmentReplaceNode) KeyIndexAndWriteTo(w io.Writer) (segmentindex.Key, 
 			return out, err
 		}
 		written += 4
+		// fmt.Printf("  ==> written sec key[%d] len [%d]\n", j, 4)
 
 		if secondaryKeyLength == 0 {
 			// we're done here
@@ -93,6 +98,7 @@ func (s *segmentReplaceNode) KeyIndexAndWriteTo(w io.Writer) (segmentindex.Key, 
 			return out, errors.Wrapf(err, "write secondary key %d", j)
 		}
 		written += n
+		// fmt.Printf("  ==> written sec key[%d] [%d]\n", j, n)
 	}
 
 	return segmentindex.Key{
@@ -112,6 +118,7 @@ func ParseReplaceNode(r io.Reader, secondaryIndexCount uint16) (segmentReplaceNo
 	if n, err := io.ReadFull(r, tmpBuf); err != nil {
 		return out, errors.Wrap(err, "read tombstone and value length")
 	} else {
+		// fmt.Printf("  ==> tombstone + value len [%d]\n", n)
 		out.offset += n
 	}
 
@@ -121,12 +128,14 @@ func ParseReplaceNode(r io.Reader, secondaryIndexCount uint16) (segmentReplaceNo
 	if n, err := io.ReadFull(r, out.value); err != nil {
 		return out, errors.Wrap(err, "read value")
 	} else {
+		// fmt.Printf("  ==> value [%d]\n", n)
 		out.offset += n
 	}
 
 	if n, err := io.ReadFull(r, tmpBuf[0:4]); err != nil {
 		return out, errors.Wrap(err, "read key length encoding")
 	} else {
+		// fmt.Printf("  ==> key len [%d]\n", n)
 		out.offset += n
 	}
 
@@ -135,9 +144,11 @@ func ParseReplaceNode(r io.Reader, secondaryIndexCount uint16) (segmentReplaceNo
 	if n, err := io.ReadFull(r, out.primaryKey); err != nil {
 		return out, errors.Wrap(err, "read key")
 	} else {
+		// fmt.Printf("  ==> key [%d]\n", n)
 		out.offset += n
 	}
 
+	out.secondaryIndexCount = secondaryIndexCount
 	if secondaryIndexCount > 0 {
 		out.secondaryKeys = make([][]byte, secondaryIndexCount)
 	}
@@ -146,6 +157,7 @@ func ParseReplaceNode(r io.Reader, secondaryIndexCount uint16) (segmentReplaceNo
 		if n, err := io.ReadFull(r, tmpBuf[0:4]); err != nil {
 			return out, errors.Wrap(err, "read secondary key length encoding")
 		} else {
+			// fmt.Printf("  ==> sec key[%d] len [%d]\n", j, n)
 			out.offset += n
 		}
 		secKeyLen := binary.LittleEndian.Uint32(tmpBuf[0:4])
@@ -157,6 +169,7 @@ func ParseReplaceNode(r io.Reader, secondaryIndexCount uint16) (segmentReplaceNo
 		if n, err := io.ReadFull(r, out.secondaryKeys[j]); err != nil {
 			return out, errors.Wrap(err, "read secondary key")
 		} else {
+			// fmt.Printf("  ==> sec key[%d] [%d]\n", j, n)
 			out.offset += n
 		}
 	}
