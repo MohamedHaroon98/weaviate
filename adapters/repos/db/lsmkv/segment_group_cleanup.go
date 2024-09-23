@@ -12,12 +12,16 @@
 package lsmkv
 
 import (
+	"encoding/binary"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"time"
 
 	"github.com/sirupsen/logrus"
 	"github.com/weaviate/weaviate/entities/cyclemanager"
+	bolt "go.etcd.io/bbolt"
 )
 
 type keyExistsOnUpperSegmentsFn func(key []byte) (bool, error)
@@ -57,7 +61,10 @@ func (sg *SegmentGroup) cleanupOnce(shouldAbort cyclemanager.ShouldAbortCallback
 
 	// TODO AL: take shouldAbort into account
 
-	segmentIdx := sg.findCleanupCandidate()
+	segmentIdx, err := sg.findCleanupCandidate()
+	if err != nil {
+		return false, err
+	}
 	if segmentIdx == -1 {
 		return false, nil
 	}
@@ -118,13 +125,164 @@ func (sg *SegmentGroup) cleanupOnce(shouldAbort cyclemanager.ShouldAbortCallback
 	return true, nil
 }
 
-func (sg *SegmentGroup) findCleanupCandidate() int {
+var cleanupBucket = []byte("cleanup")
+var cleanupInterval = time.Minute // TODO AL: env configured
+
+func (sg *SegmentGroup) findCleanupCandidate() (int, error) {
+	noCandidate := -1
+
 	if sg.isReadyOnly() {
-		return -1
+		fmt.Printf("  ==> no candidate / read only\n")
+		return noCandidate, nil
 	}
 
-	// TODO AL: implement
-	return 0
+	var l int
+	var ids []uint64
+	var sizes []int64
+
+	err := func() error {
+		sg.maintenanceLock.RLock()
+		defer sg.maintenanceLock.RUnlock()
+
+		if l = len(sg.segments); l > 1 {
+			ids = make([]uint64, l)
+			sizes = make([]int64, l)
+
+			for i, seg := range sg.segments {
+				id, err := strconv.ParseUint(segmentID(seg.path), 10, 64)
+				if err != nil {
+					return fmt.Errorf("parse segment id %q: %w", segmentID(seg.path), err)
+				}
+				ids[i] = id
+				sizes[i] = seg.size
+			}
+		}
+		return nil
+	}()
+	if err != nil {
+		fmt.Printf("  ==> no candidate / segments read, err [%s]\n", err)
+		return noCandidate, err
+	}
+	if l <= 1 {
+		fmt.Printf("  ==> no candidate / len [%d]\n", l)
+		return noCandidate, nil
+	}
+
+	path := filepath.Join(sg.dir, "cleanup.db")
+	db, err := bolt.Open(path, 0o600, nil)
+	if err != nil {
+		fmt.Printf("  ==> no candidate / open bolt, err [%s]\n", err)
+		return noCandidate, fmt.Errorf("open cleanup bolt %q: %w", path, err)
+	}
+	defer db.Close()
+
+	err = db.Update(func(tx *bolt.Tx) error {
+		_, err := tx.CreateBucketIfNotExists(cleanupBucket)
+		return err
+	})
+	if err != nil {
+		fmt.Printf("  ==> no candidate / create bucket, err [%s]\n", err)
+		return noCandidate, fmt.Errorf("create cleanup bolt %q: %w", path, err)
+	}
+
+	now := time.Now()
+	tsOldest := now.UnixNano()
+	tsThreshold := now.Add(-cleanupInterval).UnixNano()
+
+	kToDelete := [][]byte{}
+	candidateIdx := noCandidate
+
+	err = db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(cleanupBucket)
+		c := b.Cursor()
+
+		idx := 0
+		ck, cv := c.First()
+
+		// no point cleaning last segment, therefore "l-1"
+		for ck != nil && idx < l-1 {
+			cid := binary.BigEndian.Uint64(ck)
+			id := ids[idx]
+
+			fmt.Printf("  ==> loop cid [%d] id [%d]\n", cid, id)
+
+			if id > cid {
+				// id no longer exists, to be removed from bolt
+				kToDelete = append(kToDelete, ck)
+				ck, cv = c.Next()
+			} else if id < cid {
+				// id not yet present in bolt
+				if tsOldest > 0 {
+					tsOldest = 0
+					candidateIdx = idx
+				}
+				idx++
+			} else {
+				// id present in bolt
+				cts := int64(binary.BigEndian.Uint64(cv))
+				if tsOldest > cts {
+					tsOldest = cts
+					candidateIdx = idx
+				}
+				ck, cv = c.Next()
+				idx++
+			}
+		}
+		// in case 1st loop finished due to idx reached len
+		for ; ck != nil; ck, _ = c.Next() {
+			cid := binary.BigEndian.Uint64(ck)
+			if cid != ids[l-1] {
+				kToDelete = append(kToDelete, ck)
+			}
+		}
+		// in case 1st loop finished due to cursor finished
+		for ; idx < l-1 && tsOldest > 0; idx++ {
+			tsOldest = 0
+			candidateIdx = idx
+		}
+		return nil
+	})
+	if err != nil {
+		fmt.Printf("  ==> no candidate / searching, err [%s]\n", err)
+		return noCandidate, fmt.Errorf("searching cleanup bolt %q: %w", path, err)
+	}
+
+	hasDeletes := len(kToDelete) > 0
+	hasCandidate := candidateIdx != noCandidate && tsOldest < tsThreshold
+
+	if hasDeletes || hasCandidate {
+		err = db.Update(func(tx *bolt.Tx) error {
+			b := tx.Bucket(cleanupBucket)
+
+			for _, k := range kToDelete {
+				if err := b.Delete(k); err != nil {
+					return err
+				}
+			}
+			if hasCandidate {
+				bufK := make([]byte, 8)
+				bufV := make([]byte, 8)
+
+				fmt.Printf("  ==> storing candidate idx [%d] id [%d] ts [%d]\n",
+					candidateIdx, ids[candidateIdx], tsOldest)
+
+				binary.BigEndian.PutUint64(bufK, ids[candidateIdx])
+				binary.BigEndian.PutUint64(bufV, uint64(now.UnixNano()))
+				return b.Put(bufK, bufV)
+			}
+			return nil
+		})
+		if err != nil {
+			fmt.Printf("  ==> no candidate / updating, err [%s]\n", err)
+			return noCandidate, fmt.Errorf("updating cleanup bolt %q: %w", path, err)
+		}
+		if hasCandidate {
+			fmt.Printf("  ==> candidate! [%d]\n", candidateIdx)
+			return candidateIdx, nil
+		}
+	}
+	fmt.Printf("  ==> no candidate / end\n")
+	return noCandidate, nil
 }
 
 func (sg *SegmentGroup) replaceCleanedSegment(segmentIdx int, tmpSegmentPath string,
