@@ -107,7 +107,7 @@ func (sg *SegmentGroup) makeKeyExistsOnUpperSegments(segmentIdx int) keyExistsOn
 func (sg *SegmentGroup) cleanupOnce(shouldAbort cyclemanager.ShouldAbortCallback) (bool, error) {
 	// TODO AL: take shouldAbort into account
 
-	segmentIdx, onSuccess, err := sg.findCleanupCandidate()
+	segmentIdx, onCompleted, err := sg.findCleanupCandidate()
 	if err != nil {
 		return false, err
 	}
@@ -167,20 +167,22 @@ func (sg *SegmentGroup) cleanupOnce(shouldAbort cyclemanager.ShouldAbortCallback
 	if err := sg.replaceCleanedSegment(segmentIdx, tmpSegmentPath); err != nil {
 		return false, fmt.Errorf("replace compacted segments: %w", err)
 	}
-	if err := onSuccess(sg.segmentAtPos(segmentIdx).size); err != nil {
+	if err := onCompleted(sg.segmentAtPos(segmentIdx).size); err != nil {
 		return false, fmt.Errorf("callback cleaned segment file: %w", err)
 	}
 
 	return true, nil
 }
 
-func (sg *SegmentGroup) findCleanupCandidate() (int, func(size int64) error, error) {
+type onCleanupCompletedFunc func(size int64) error
+
+func (sg *SegmentGroup) findCleanupCandidate() (int, onCleanupCompletedFunc, error) {
 	noCandidate := -1
-	var noopUpdate func(size int64) error = nil
+	var noopOnCompleted onCleanupCompletedFunc = nil
 
 	if sg.isReadyOnly() {
 		fmt.Printf("  ==> no candidate / read only\n")
-		return noCandidate, noopUpdate, nil
+		return noCandidate, noopOnCompleted, nil
 	}
 
 	var count int
@@ -208,11 +210,11 @@ func (sg *SegmentGroup) findCleanupCandidate() (int, func(size int64) error, err
 	}()
 	if err != nil {
 		fmt.Printf("  ==> no candidate / segments read, err [%s]\n", err)
-		return noCandidate, noopUpdate, err
+		return noCandidate, noopOnCompleted, err
 	}
 	if count <= 1 {
 		fmt.Printf("  ==> no candidate / len [%d]\n", count)
-		return noCandidate, noopUpdate, nil
+		return noCandidate, noopOnCompleted, nil
 	}
 
 	now := time.Now()
@@ -252,14 +254,14 @@ func (sg *SegmentGroup) findCleanupCandidate() (int, func(size int64) error, err
 				idx++
 			} else {
 				// id present in bolt
-				cts := int64(binary.BigEndian.Uint64(cv[0:8]))
-				fmt.Printf("    ==> id = cid ; tsOldest [%d] cts [%d]\n", tsOldest, cts)
-				if tsOldest > cts {
-					csize := int64(binary.BigEndian.Uint64(cv[8:16]))
-					size := sizes[idx]
-					fmt.Printf("    ==> tsOldest > cts ; size [%d] csize [%d]\n", size, csize)
-					if size != csize {
-						fmt.Printf("    ==> size != csize\n")
+				csize := int64(binary.BigEndian.Uint64(cv[8:16]))
+				size := sizes[idx]
+				fmt.Printf("    ==> id = cid ; size [%d] csize [%d]\n", size, csize)
+				if size != csize {
+					cts := int64(binary.BigEndian.Uint64(cv[0:8]))
+					fmt.Printf("    ==> size != csize ; tsOldest [%d] cts [%d]\n", tsOldest, cts)
+					if tsOldest > cts {
+						fmt.Printf("    ==> tsOldest > cts\n")
 						tsOldest = cts
 						candidateIdx = idx
 					}
@@ -286,7 +288,7 @@ func (sg *SegmentGroup) findCleanupCandidate() (int, func(size int64) error, err
 	})
 	if err != nil {
 		fmt.Printf("  ==> no candidate / searching, err [%s]\n", err)
-		return noCandidate, noopUpdate, fmt.Errorf("searching cleanup bolt %q: %w", sg.cleanupDB.Path(), err)
+		return noCandidate, noopOnCompleted, fmt.Errorf("searching cleanup bolt %q: %w", sg.cleanupDB.Path(), err)
 	}
 
 	if len(kToDelete) > 0 {
@@ -302,13 +304,13 @@ func (sg *SegmentGroup) findCleanupCandidate() (int, func(size int64) error, err
 		})
 		if err != nil {
 			fmt.Printf("  ==> no candidate / deleting, err [%s]\n", err)
-			return noCandidate, noopUpdate, fmt.Errorf("deleting from cleanup bolt %q: %w", sg.cleanupDB.Path(), err)
+			return noCandidate, noopOnCompleted, fmt.Errorf("deleting from cleanup bolt %q: %w", sg.cleanupDB.Path(), err)
 		}
 	}
 
 	if candidateIdx != noCandidate && tsOldest < tsThreshold {
 		id := ids[candidateIdx]
-		update := func(newSize int64) error {
+		onCompleted := func(newSize int64) error {
 			err := sg.cleanupDB.Update(func(tx *bolt.Tx) error {
 				b := tx.Bucket(cleanupBucket)
 				bufK := make([]byte, 8)
@@ -328,11 +330,11 @@ func (sg *SegmentGroup) findCleanupCandidate() (int, func(size int64) error, err
 			return nil
 		}
 		fmt.Printf("  ==> candidate! [%d][%d]\n", candidateIdx, id)
-		return candidateIdx, update, nil
+		return candidateIdx, onCompleted, nil
 	}
 
 	fmt.Printf("  ==> no candidate / end\n")
-	return noCandidate, noopUpdate, nil
+	return noCandidate, noopOnCompleted, nil
 }
 
 func (sg *SegmentGroup) replaceCleanedSegment(segmentIdx int, tmpSegmentPath string,
