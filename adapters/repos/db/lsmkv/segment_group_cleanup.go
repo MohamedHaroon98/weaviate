@@ -24,11 +24,11 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-const cleanupDbFileName = "cleanup.db"
+const cleanupDbFileName = "cleanup.db.bolt"
 
 var cleanupBucket = []byte("cleanup")
 
-var cleanupInterval = time.Minute * 5 // TODO AL: env configured
+var cleanupInterval = time.Minute * 1 // TODO AL: env configured
 
 func (sg *SegmentGroup) isCleanupSupported() bool {
 	switch sg.strategy {
@@ -237,22 +237,32 @@ func (sg *SegmentGroup) findCleanupCandidate() (int, func(size int64) error, err
 			fmt.Printf("  ==> loop cid [%d] id [%d]\n", cid, id)
 
 			if id > cid {
+				fmt.Printf("    ==> id > cid ; deleting cid\n")
 				// id no longer exists, to be removed from bolt
 				kToDelete = append(kToDelete, ck)
 				ck, cv = c.Next()
 			} else if id < cid {
+				fmt.Printf("    ==> id < cid ; tsOldest [%d]\n", tsOldest)
 				// id not yet present in bolt
 				if tsOldest > 0 {
+					fmt.Printf("    ==> tsOldest > 0\n")
 					tsOldest = 0
 					candidateIdx = idx
 				}
 				idx++
 			} else {
 				// id present in bolt
-				cts := int64(binary.BigEndian.Uint64(cv))
+				cts := int64(binary.BigEndian.Uint64(cv[0:8]))
+				fmt.Printf("    ==> id = cid ; tsOldest [%d] cts [%d]\n", tsOldest, cts)
 				if tsOldest > cts {
-					tsOldest = cts
-					candidateIdx = idx
+					csize := int64(binary.BigEndian.Uint64(cv[8:16]))
+					size := sizes[idx]
+					fmt.Printf("    ==> tsOldest > cts ; size [%d] csize [%d]\n", size, csize)
+					if size != csize {
+						fmt.Printf("    ==> size != csize\n")
+						tsOldest = cts
+						candidateIdx = idx
+					}
 				}
 				ck, cv = c.Next()
 				idx++
@@ -261,12 +271,14 @@ func (sg *SegmentGroup) findCleanupCandidate() (int, func(size int64) error, err
 		// in case 1st loop finished due to idx reached len
 		for ; ck != nil; ck, _ = c.Next() {
 			cid := binary.BigEndian.Uint64(ck)
+			fmt.Printf("  ==> cursor loop ; cid [%d]\n", cid)
 			if cid != ids[count-1] {
 				kToDelete = append(kToDelete, ck)
 			}
 		}
 		// in case 1st loop finished due to cursor finished
 		for ; idx < count-1 && tsOldest > 0; idx++ {
+			fmt.Printf("  ==> idx loop ; tsOldest [%d]\n", tsOldest)
 			tsOldest = 0
 			candidateIdx = idx
 		}
@@ -294,20 +306,20 @@ func (sg *SegmentGroup) findCleanupCandidate() (int, func(size int64) error, err
 		}
 	}
 
-	// TODO AL: add support for size
 	if candidateIdx != noCandidate && tsOldest < tsThreshold {
 		id := ids[candidateIdx]
 		update := func(newSize int64) error {
 			err := sg.cleanupDB.Update(func(tx *bolt.Tx) error {
 				b := tx.Bucket(cleanupBucket)
 				bufK := make([]byte, 8)
-				bufV := make([]byte, 8)
+				bufV := make([]byte, 16)
 
 				fmt.Printf("  ==> storing candidate idx [%d] id [%d] ts [%d]\n",
 					candidateIdx, id, tsOldest)
 
 				binary.BigEndian.PutUint64(bufK, id)
-				binary.BigEndian.PutUint64(bufV, uint64(now.UnixNano()))
+				binary.BigEndian.PutUint64(bufV[0:8], uint64(now.UnixNano()))
+				binary.BigEndian.PutUint64(bufV[8:16], uint64(newSize))
 				return b.Put(bufK, bufV)
 			})
 			if err != nil {
@@ -315,7 +327,7 @@ func (sg *SegmentGroup) findCleanupCandidate() (int, func(size int64) error, err
 			}
 			return nil
 		}
-		fmt.Printf("  ==> candidate! [%d]\n", candidateIdx)
+		fmt.Printf("  ==> candidate! [%d][%d]\n", candidateIdx, id)
 		return candidateIdx, update, nil
 	}
 
