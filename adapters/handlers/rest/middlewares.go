@@ -130,7 +130,7 @@ func makeSetupGlobalMiddleware(appState *state.State) func(http.Handler) http.Ha
 		handler = makeCatchPanics(appState.Logger, newPanicsRequestsTotal(appState.Metrics, appState.Logger))(handler)
 
 		// Create a new middleware for RBAC Authz
-		if appState.RBACEnforcer != nil {
+		if appState.RBACEnforcer != nil && appState.ServerConfig.Config.EnableRBACEnforcer {
 			handler = rbacMiddleware(appState)(handler)
 		}
 
