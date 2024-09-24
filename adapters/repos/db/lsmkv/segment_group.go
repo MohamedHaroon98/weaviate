@@ -27,6 +27,7 @@ import (
 	"github.com/weaviate/weaviate/entities/lsmkv"
 	"github.com/weaviate/weaviate/entities/storagestate"
 	"github.com/weaviate/weaviate/usecases/memwatch"
+	bolt "go.etcd.io/bbolt"
 )
 
 type SegmentGroup struct {
@@ -64,6 +65,8 @@ type SegmentGroup struct {
 
 	allocChecker   memwatch.AllocChecker
 	maxSegmentSize int64
+
+	cleanupDB *bolt.DB
 }
 
 type sgConfig struct {
@@ -257,6 +260,10 @@ func newSegmentGroup(logger logrus.FieldLogger, metrics *Metrics,
 
 	if sg.monitorCount {
 		sg.metrics.ObjectCount(sg.count())
+	}
+
+	if err := sg.initCleanupDBIfSupported(); err != nil {
+		return nil, err
 	}
 
 	// TODO AL: use separate cycle callback for cleanup?
@@ -485,6 +492,9 @@ func (sg *SegmentGroup) shutdown(ctx context.Context) error {
 	if err := sg.compactionCallbackCtrl.Unregister(ctx); err != nil {
 		return fmt.Errorf("long-running compaction in progress: %w", ctx.Err())
 	}
+	if err := sg.closeCleanupDBIfSupported(); err != nil {
+		return err
+	}
 
 	// Lock acquirement placed after compaction cycle stop request, due to occasional deadlock,
 	// because compaction logic used in cycle also requires maintenance lock.
@@ -555,17 +565,19 @@ func (sg *SegmentGroup) compactOrCleanup(shouldAbort cyclemanager.ShouldAbortCal
 		return true
 	}
 
-	if cleaned, err := sg.cleanupOnce(shouldAbort); err != nil {
-		sg.logger.WithField("action", "lsm_cleanup").
-			WithField("path", sg.dir).
-			WithError(err).
-			Errorf("cleanup failed")
-	} else if !cleaned {
-		sg.logger.WithField("action", "lsm_cleanup").
-			WithField("path", sg.dir).
-			Trace("no segments eligible for cleanup")
-	} else {
-		return true
+	if sg.isCleanupSupported() {
+		if cleaned, err := sg.cleanupOnce(shouldAbort); err != nil {
+			sg.logger.WithField("action", "lsm_cleanup").
+				WithField("path", sg.dir).
+				WithError(err).
+				Errorf("cleanup failed")
+		} else if !cleaned {
+			sg.logger.WithField("action", "lsm_cleanup").
+				WithField("path", sg.dir).
+				Trace("no segments eligible for cleanup")
+		} else {
+			return true
+		}
 	}
 
 	return false

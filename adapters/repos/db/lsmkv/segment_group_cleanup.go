@@ -24,6 +24,65 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
+const cleanupDbFileName = "cleanup.db"
+
+var cleanupBucket = []byte("cleanup")
+
+var cleanupInterval = time.Minute * 5 // TODO AL: env configured
+
+func (sg *SegmentGroup) isCleanupSupported() bool {
+	switch sg.strategy {
+	case StrategyReplace:
+		return true
+	case StrategyMapCollection,
+		StrategySetCollection,
+		StrategyRoaringSet:
+		// TODO AL: add roaring set range
+		// TODO AL: add support for other strategies in the future?
+		return false
+	default:
+		err := fmt.Errorf("unrecognized strategy %q", sg.strategy)
+		sg.logger.
+			WithField("action", "check_segments_cleanup_supported").
+			WithField("dir", sg.dir).
+			WithError(err).
+			Errorf("unrecognized strategy")
+		return false
+	}
+}
+
+func (sg *SegmentGroup) initCleanupDBIfSupported() error {
+	if sg.isCleanupSupported() {
+		path := filepath.Join(sg.dir, cleanupDbFileName)
+
+		db, err := bolt.Open(path, 0o600, nil)
+		if err != nil {
+			return fmt.Errorf("open cleanup bolt db %q: %w", path, err)
+		}
+
+		err = db.Update(func(tx *bolt.Tx) error {
+			_, err := tx.CreateBucketIfNotExists(cleanupBucket)
+			return err
+		})
+		if err != nil {
+			return fmt.Errorf("bucket cleanup bolt db %q: %w", path, err)
+		}
+
+		sg.cleanupDB = db
+	}
+	return nil
+}
+
+func (sg *SegmentGroup) closeCleanupDBIfSupported() error {
+	if sg.isCleanupSupported() {
+		if err := sg.cleanupDB.Close(); err != nil {
+			path := filepath.Join(sg.dir, cleanupDbFileName)
+			return fmt.Errorf("close cleanup bolt db %q: %w", path, err)
+		}
+	}
+	return nil
+}
+
 type keyExistsOnUpperSegmentsFn func(key []byte) (bool, error)
 
 func (sg *SegmentGroup) makeKeyExistsOnUpperSegments(segmentIdx int) keyExistsOnUpperSegmentsFn {
@@ -46,22 +105,9 @@ func (sg *SegmentGroup) makeKeyExistsOnUpperSegments(segmentIdx int) keyExistsOn
 }
 
 func (sg *SegmentGroup) cleanupOnce(shouldAbort cyclemanager.ShouldAbortCallback) (bool, error) {
-	// validate supported strategy
-	switch sg.strategy {
-	case StrategyReplace:
-		// supported, continue
-	case StrategySetCollection, StrategyMapCollection, StrategyRoaringSet:
-		// TODO AL: add support for other strategies in the future
-		return false, nil
-	default:
-		return false, fmt.Errorf("unrecognized strategy %q", sg.strategy)
-	}
-
-	// fmt.Printf("  ==> cleanupOnce %q strategy %q\n", sg.dir, sg.strategy)
-
 	// TODO AL: take shouldAbort into account
 
-	segmentIdx, err := sg.findCleanupCandidate()
+	segmentIdx, onSuccess, err := sg.findCleanupCandidate()
 	if err != nil {
 		return false, err
 	}
@@ -121,22 +167,23 @@ func (sg *SegmentGroup) cleanupOnce(shouldAbort cyclemanager.ShouldAbortCallback
 	if err := sg.replaceCleanedSegment(segmentIdx, tmpSegmentPath); err != nil {
 		return false, fmt.Errorf("replace compacted segments: %w", err)
 	}
+	if err := onSuccess(sg.segmentAtPos(segmentIdx).size); err != nil {
+		return false, fmt.Errorf("callback cleaned segment file: %w", err)
+	}
 
 	return true, nil
 }
 
-var cleanupBucket = []byte("cleanup")
-var cleanupInterval = time.Minute // TODO AL: env configured
-
-func (sg *SegmentGroup) findCleanupCandidate() (int, error) {
+func (sg *SegmentGroup) findCleanupCandidate() (int, func(size int64) error, error) {
 	noCandidate := -1
+	var noopUpdate func(size int64) error = nil
 
 	if sg.isReadyOnly() {
 		fmt.Printf("  ==> no candidate / read only\n")
-		return noCandidate, nil
+		return noCandidate, noopUpdate, nil
 	}
 
-	var l int
+	var count int
 	var ids []uint64
 	var sizes []int64
 
@@ -144,9 +191,9 @@ func (sg *SegmentGroup) findCleanupCandidate() (int, error) {
 		sg.maintenanceLock.RLock()
 		defer sg.maintenanceLock.RUnlock()
 
-		if l = len(sg.segments); l > 1 {
-			ids = make([]uint64, l)
-			sizes = make([]int64, l)
+		if count = len(sg.segments); count > 1 {
+			ids = make([]uint64, count)
+			sizes = make([]int64, count)
 
 			for i, seg := range sg.segments {
 				id, err := strconv.ParseUint(segmentID(seg.path), 10, 64)
@@ -161,28 +208,11 @@ func (sg *SegmentGroup) findCleanupCandidate() (int, error) {
 	}()
 	if err != nil {
 		fmt.Printf("  ==> no candidate / segments read, err [%s]\n", err)
-		return noCandidate, err
+		return noCandidate, noopUpdate, err
 	}
-	if l <= 1 {
-		fmt.Printf("  ==> no candidate / len [%d]\n", l)
-		return noCandidate, nil
-	}
-
-	path := filepath.Join(sg.dir, "cleanup.db")
-	db, err := bolt.Open(path, 0o600, nil)
-	if err != nil {
-		fmt.Printf("  ==> no candidate / open bolt, err [%s]\n", err)
-		return noCandidate, fmt.Errorf("open cleanup bolt %q: %w", path, err)
-	}
-	defer db.Close()
-
-	err = db.Update(func(tx *bolt.Tx) error {
-		_, err := tx.CreateBucketIfNotExists(cleanupBucket)
-		return err
-	})
-	if err != nil {
-		fmt.Printf("  ==> no candidate / create bucket, err [%s]\n", err)
-		return noCandidate, fmt.Errorf("create cleanup bolt %q: %w", path, err)
+	if count <= 1 {
+		fmt.Printf("  ==> no candidate / len [%d]\n", count)
+		return noCandidate, noopUpdate, nil
 	}
 
 	now := time.Now()
@@ -192,7 +222,7 @@ func (sg *SegmentGroup) findCleanupCandidate() (int, error) {
 	kToDelete := [][]byte{}
 	candidateIdx := noCandidate
 
-	err = db.View(func(tx *bolt.Tx) error {
+	err = sg.cleanupDB.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(cleanupBucket)
 		c := b.Cursor()
 
@@ -200,7 +230,7 @@ func (sg *SegmentGroup) findCleanupCandidate() (int, error) {
 		ck, cv := c.First()
 
 		// no point cleaning last segment, therefore "l-1"
-		for ck != nil && idx < l-1 {
+		for ck != nil && idx < count-1 {
 			cid := binary.BigEndian.Uint64(ck)
 			id := ids[idx]
 
@@ -231,12 +261,12 @@ func (sg *SegmentGroup) findCleanupCandidate() (int, error) {
 		// in case 1st loop finished due to idx reached len
 		for ; ck != nil; ck, _ = c.Next() {
 			cid := binary.BigEndian.Uint64(ck)
-			if cid != ids[l-1] {
+			if cid != ids[count-1] {
 				kToDelete = append(kToDelete, ck)
 			}
 		}
 		// in case 1st loop finished due to cursor finished
-		for ; idx < l-1 && tsOldest > 0; idx++ {
+		for ; idx < count-1 && tsOldest > 0; idx++ {
 			tsOldest = 0
 			candidateIdx = idx
 		}
@@ -244,14 +274,11 @@ func (sg *SegmentGroup) findCleanupCandidate() (int, error) {
 	})
 	if err != nil {
 		fmt.Printf("  ==> no candidate / searching, err [%s]\n", err)
-		return noCandidate, fmt.Errorf("searching cleanup bolt %q: %w", path, err)
+		return noCandidate, noopUpdate, fmt.Errorf("searching cleanup bolt %q: %w", sg.cleanupDB.Path(), err)
 	}
 
-	hasDeletes := len(kToDelete) > 0
-	hasCandidate := candidateIdx != noCandidate && tsOldest < tsThreshold
-
-	if hasDeletes || hasCandidate {
-		err = db.Update(func(tx *bolt.Tx) error {
+	if len(kToDelete) > 0 {
+		err = sg.cleanupDB.Update(func(tx *bolt.Tx) error {
 			b := tx.Bucket(cleanupBucket)
 
 			for _, k := range kToDelete {
@@ -259,30 +286,41 @@ func (sg *SegmentGroup) findCleanupCandidate() (int, error) {
 					return err
 				}
 			}
-			if hasCandidate {
+			return nil
+		})
+		if err != nil {
+			fmt.Printf("  ==> no candidate / deleting, err [%s]\n", err)
+			return noCandidate, noopUpdate, fmt.Errorf("deleting from cleanup bolt %q: %w", sg.cleanupDB.Path(), err)
+		}
+	}
+
+	// TODO AL: add support for size
+	if candidateIdx != noCandidate && tsOldest < tsThreshold {
+		id := ids[candidateIdx]
+		update := func(newSize int64) error {
+			err := sg.cleanupDB.Update(func(tx *bolt.Tx) error {
+				b := tx.Bucket(cleanupBucket)
 				bufK := make([]byte, 8)
 				bufV := make([]byte, 8)
 
 				fmt.Printf("  ==> storing candidate idx [%d] id [%d] ts [%d]\n",
-					candidateIdx, ids[candidateIdx], tsOldest)
+					candidateIdx, id, tsOldest)
 
-				binary.BigEndian.PutUint64(bufK, ids[candidateIdx])
+				binary.BigEndian.PutUint64(bufK, id)
 				binary.BigEndian.PutUint64(bufV, uint64(now.UnixNano()))
 				return b.Put(bufK, bufV)
+			})
+			if err != nil {
+				return fmt.Errorf("updating cleanup bolt %q: %w", sg.cleanupDB.Path(), err)
 			}
 			return nil
-		})
-		if err != nil {
-			fmt.Printf("  ==> no candidate / updating, err [%s]\n", err)
-			return noCandidate, fmt.Errorf("updating cleanup bolt %q: %w", path, err)
 		}
-		if hasCandidate {
-			fmt.Printf("  ==> candidate! [%d]\n", candidateIdx)
-			return candidateIdx, nil
-		}
+		fmt.Printf("  ==> candidate! [%d]\n", candidateIdx)
+		return candidateIdx, update, nil
 	}
+
 	fmt.Printf("  ==> no candidate / end\n")
-	return noCandidate, nil
+	return noCandidate, noopUpdate, nil
 }
 
 func (sg *SegmentGroup) replaceCleanedSegment(segmentIdx int, tmpSegmentPath string,
