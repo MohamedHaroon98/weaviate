@@ -44,7 +44,7 @@ func newSegmentCleaner(sg *SegmentGroup) (segmentCleaner, error) {
 
 	switch sg.strategy {
 	case StrategyReplace:
-		cleaner := &segmentCleanerImpl{sg: sg}
+		cleaner := &segmentCleanerCommon{sg: sg}
 		if err := cleaner.init(); err != nil {
 			return nil, err
 		}
@@ -73,13 +73,12 @@ func (c *segmentCleanerNoop) cleanupOnce(shouldAbort cyclemanager.ShouldAbortCal
 
 // ================================================================
 
-// TODO AL: rename
-type segmentCleanerImpl struct {
+type segmentCleanerCommon struct {
 	sg *SegmentGroup
 	db *bolt.DB
 }
 
-func (c *segmentCleanerImpl) init() error {
+func (c *segmentCleanerCommon) init() error {
 	path := filepath.Join(c.sg.dir, cleanupDbFileName)
 	var db *bolt.DB
 	var err error
@@ -104,14 +103,14 @@ func (c *segmentCleanerImpl) init() error {
 	return nil
 }
 
-func (c *segmentCleanerImpl) close() error {
+func (c *segmentCleanerCommon) close() error {
 	if err := c.db.Close(); err != nil {
 		return fmt.Errorf("close cleanup bolt db %q: %w", c.db.Path(), err)
 	}
 	return nil
 }
 
-func (c *segmentCleanerImpl) findCandidate() (int, onCompletedFunc, error) {
+func (c *segmentCleanerCommon) findCandidate() (int, onCompletedFunc, error) {
 	noCandidate := -1
 
 	if c.sg.isReadyOnly() {
@@ -184,7 +183,7 @@ func (c *segmentCleanerImpl) findCandidate() (int, onCompletedFunc, error) {
 	return noCandidate, nil, nil
 }
 
-func (c *segmentCleanerImpl) getSegmentIdsAndSizes() ([]int64, []int64, error) {
+func (c *segmentCleanerCommon) getSegmentIdsAndSizes() ([]int64, []int64, error) {
 	c.sg.maintenanceLock.RLock()
 	defer c.sg.maintenanceLock.RUnlock()
 
@@ -209,7 +208,7 @@ func (c *segmentCleanerImpl) getSegmentIdsAndSizes() ([]int64, []int64, error) {
 	return ids, sizes, nil
 }
 
-func (c *segmentCleanerImpl) readNextAllowed() int64 {
+func (c *segmentCleanerCommon) readNextAllowed() int64 {
 	ts := int64(0)
 	c.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(cleanupMetaBucket)
@@ -222,7 +221,7 @@ func (c *segmentCleanerImpl) readNextAllowed() int64 {
 	return ts
 }
 
-func (c *segmentCleanerImpl) storeNextAllowed(ts int64) error {
+func (c *segmentCleanerCommon) storeNextAllowed(ts int64) error {
 	if err := c.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(cleanupMetaBucket)
 		bufV := make([]byte, 8)
@@ -235,7 +234,7 @@ func (c *segmentCleanerImpl) storeNextAllowed(ts int64) error {
 	return nil
 }
 
-func (c *segmentCleanerImpl) deleteSegmentMetas(segIds [][]byte) error {
+func (c *segmentCleanerCommon) deleteSegmentMetas(segIds [][]byte) error {
 	if len(segIds) > 0 {
 		if err := c.db.Update(func(tx *bolt.Tx) error {
 			b := tx.Bucket(cleanupSegmentsBucket)
@@ -252,7 +251,7 @@ func (c *segmentCleanerImpl) deleteSegmentMetas(segIds [][]byte) error {
 	return nil
 }
 
-func (c *segmentCleanerImpl) readEarliestCleaned(ids, sizes []int64,
+func (c *segmentCleanerCommon) readEarliestCleaned(ids, sizes []int64,
 	candidateIdx int, earliestCleanedTs int64,
 ) (int, int64, [][]byte) {
 	count := len(ids)
@@ -327,7 +326,7 @@ func (c *segmentCleanerImpl) readEarliestCleaned(ids, sizes []int64,
 	return candidateIdx, earliestCleanedTs, nonExistentSegmentKeys
 }
 
-func (c *segmentCleanerImpl) storeSegmentMeta(id, size, cleanedTs int64) error {
+func (c *segmentCleanerCommon) storeSegmentMeta(id, size, cleanedTs int64) error {
 	if err := c.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(cleanupSegmentsBucket)
 		bufK := make([]byte, 8)
@@ -343,7 +342,7 @@ func (c *segmentCleanerImpl) storeSegmentMeta(id, size, cleanedTs int64) error {
 	return nil
 }
 
-func (c *segmentCleanerImpl) cleanupOnce(shouldAbort cyclemanager.ShouldAbortCallback,
+func (c *segmentCleanerCommon) cleanupOnce(shouldAbort cyclemanager.ShouldAbortCallback,
 ) (bool, error) {
 	// TODO AL: take shouldAbort into account
 
