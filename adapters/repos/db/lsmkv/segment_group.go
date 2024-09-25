@@ -28,7 +28,6 @@ import (
 	"github.com/weaviate/weaviate/entities/lsmkv"
 	"github.com/weaviate/weaviate/entities/storagestate"
 	"github.com/weaviate/weaviate/usecases/memwatch"
-	bolt "go.etcd.io/bbolt"
 )
 
 type SegmentGroup struct {
@@ -67,7 +66,7 @@ type SegmentGroup struct {
 	allocChecker   memwatch.AllocChecker
 	maxSegmentSize int64
 
-	cleanupDB       *bolt.DB
+	segmentCleaner  segmentCleaner
 	cleanupInterval time.Duration
 }
 
@@ -266,9 +265,11 @@ func newSegmentGroup(logger logrus.FieldLogger, metrics *Metrics,
 		sg.metrics.ObjectCount(sg.count())
 	}
 
-	if err := sg.initCleanupDBIfSupported(); err != nil {
+	sc, err := newSegmentCleaner(sg)
+	if err != nil {
 		return nil, err
 	}
+	sg.segmentCleaner = sc
 
 	// TODO AL: use separate cycle callback for cleanup?
 	id := "segmentgroup/compaction/" + sg.dir
@@ -496,7 +497,7 @@ func (sg *SegmentGroup) shutdown(ctx context.Context) error {
 	if err := sg.compactionCallbackCtrl.Unregister(ctx); err != nil {
 		return fmt.Errorf("long-running compaction in progress: %w", ctx.Err())
 	}
-	if err := sg.closeCleanupDBIfSupported(); err != nil {
+	if err := sg.segmentCleaner.close(); err != nil {
 		return err
 	}
 
@@ -569,19 +570,13 @@ func (sg *SegmentGroup) compactOrCleanup(shouldAbort cyclemanager.ShouldAbortCal
 		return true
 	}
 
-	if sg.isCleanupSupported() {
-		if cleaned, err := sg.cleanupOnce(shouldAbort); err != nil {
-			sg.logger.WithField("action", "lsm_cleanup").
-				WithField("path", sg.dir).
-				WithError(err).
-				Errorf("cleanup failed")
-		} else if !cleaned {
-			sg.logger.WithField("action", "lsm_cleanup").
-				WithField("path", sg.dir).
-				Trace("no segments eligible for cleanup")
-		} else {
-			return true
-		}
+	if cleaned, err := sg.segmentCleaner.cleanupOnce(shouldAbort); err != nil {
+		sg.logger.WithField("action", "lsm_cleanup").
+			WithField("path", sg.dir).
+			WithError(err).
+			Errorf("cleanup failed")
+	} else if cleaned {
+		return true
 	}
 
 	return false
