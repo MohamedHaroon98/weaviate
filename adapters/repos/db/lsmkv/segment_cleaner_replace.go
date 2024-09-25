@@ -18,6 +18,7 @@ import (
 	"io"
 
 	"github.com/weaviate/weaviate/adapters/repos/db/lsmkv/segmentindex"
+	"github.com/weaviate/weaviate/entities/cyclemanager"
 	"github.com/weaviate/weaviate/entities/lsmkv"
 )
 
@@ -47,12 +48,12 @@ func newSegmentCleanerReplace(w io.WriteSeeker, cursor *segmentCursorReplace,
 	}
 }
 
-func (p *segmentCleanerReplace) do() error {
+func (p *segmentCleanerReplace) do(shouldAbort cyclemanager.ShouldAbortCallback) error {
 	if err := p.init(); err != nil {
 		return fmt.Errorf("init: %w", err)
 	}
 
-	indexKeys, err := p.writeKeys()
+	indexKeys, err := p.writeKeys(shouldAbort)
 	if err != nil {
 		return fmt.Errorf("write keys: %w", err)
 	}
@@ -89,7 +90,7 @@ func (p *segmentCleanerReplace) init() error {
 	return nil
 }
 
-func (p *segmentCleanerReplace) writeKeys() ([]segmentindex.Key, error) {
+func (p *segmentCleanerReplace) writeKeys(shouldAbort cyclemanager.ShouldAbortCallback) ([]segmentindex.Key, error) {
 	// the (dummy) header was already written, this is our initial offset
 	offset := segmentindex.HeaderSize
 
@@ -99,7 +100,13 @@ func (p *segmentCleanerReplace) writeKeys() ([]segmentindex.Key, error) {
 	var err error
 	var keyExists bool
 
+	i := 0
 	for node, err = p.cursor.firstWithAllKeys(); err == nil || errors.Is(err, lsmkv.Deleted); node, err = p.cursor.nextWithAllKeys() {
+		i++
+		if i%100 == 0 && shouldAbort() {
+			return nil, fmt.Errorf("should abort requested")
+		}
+
 		keyExists, err = p.keyExistsFn(node.primaryKey)
 		if err != nil {
 			// fmt.Printf("  ==> loop key exists error %q\n", err)

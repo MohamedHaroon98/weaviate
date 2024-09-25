@@ -112,12 +112,6 @@ func (c *segmentCleanerCommon) close() error {
 
 func (c *segmentCleanerCommon) findCandidate() (int, onCompletedFunc, error) {
 	noCandidate := -1
-
-	if c.sg.isReadyOnly() {
-		fmt.Printf("  ==> no candidate / read only\n")
-		return noCandidate, nil, nil
-	}
-
 	nowTs := time.Now().UnixNano()
 	nextAllowedTs := nowTs - int64(c.sg.cleanupInterval)
 	nextAllowedStoredTs := c.readNextAllowed()
@@ -344,7 +338,9 @@ func (c *segmentCleanerCommon) storeSegmentMeta(id, size, cleanedTs int64) error
 
 func (c *segmentCleanerCommon) cleanupOnce(shouldAbort cyclemanager.ShouldAbortCallback,
 ) (bool, error) {
-	// TODO AL: take shouldAbort into account
+	if c.sg.isReadyOnly() {
+		return false, nil
+	}
 
 	segmentIdx, onCompleted, err := c.findCandidate()
 	if err != nil {
@@ -364,20 +360,27 @@ func (c *segmentCleanerCommon) cleanupOnce(shouldAbort cyclemanager.ShouldAbortC
 			// necessary. Cleanup can simply resume when the cluster has been
 			// scaled.
 			c.sg.logger.WithFields(logrus.Fields{
-				"action": "lsm_compaction",
-				"event":  "compaction_skipped_oom",
+				"action": "lsm_cleanup",
+				"event":  "cleanup_skipped_oom",
 				"path":   c.sg.dir,
 			}).WithError(err).
-				Warnf("skipping compaction due to memory pressure")
+				Warnf("skipping cleanup due to memory pressure")
 
 			return false, nil
 		}
 	}
 
-	segment := c.sg.segmentAtPos(segmentIdx)
+	if shouldAbort() {
+		c.sg.logger.WithFields(logrus.Fields{
+			"action": "lsm_cleanup",
+			"path":   c.sg.dir,
+		}).Warnf("skipping cleanup due to shouldAbort")
+		return false, nil
+	}
 
-	tmpSegmentPath := filepath.Join(c.sg.dir, "segment-"+segmentID(segment.path)+".db.tmp")
-	scratchSpacePath := segment.path + "cleanup.scratch.d"
+	oldSegment := c.sg.segmentAtPos(segmentIdx)
+	tmpSegmentPath := filepath.Join(c.sg.dir, "segment-"+segmentID(oldSegment.path)+".db.tmp")
+	scratchSpacePath := oldSegment.path + "cleanup.scratch.d"
 
 	file, err := os.Create(tmpSegmentPath)
 	if err != nil {
@@ -386,12 +389,14 @@ func (c *segmentCleanerCommon) cleanupOnce(shouldAbort cyclemanager.ShouldAbortC
 
 	switch c.sg.strategy {
 	case StrategyReplace:
-		c := newSegmentCleanerReplace(file, segment.newCursor(),
-			c.sg.makeKeyExistsOnUpperSegments(segmentIdx), segment.level,
-			segment.secondaryIndexCount, scratchSpacePath)
-		if err := c.do(); err != nil {
+		c := newSegmentCleanerReplace(file, oldSegment.newCursor(),
+			c.sg.makeKeyExistsOnUpperSegments(segmentIdx), oldSegment.level,
+			oldSegment.secondaryIndexCount, scratchSpacePath)
+		if err := c.do(shouldAbort); err != nil {
 			return false, err
 		}
+	default:
+		return false, fmt.Errorf("unsported strategy %q", c.sg.strategy)
 	}
 
 	if err := file.Sync(); err != nil {
