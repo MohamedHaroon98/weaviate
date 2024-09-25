@@ -26,9 +26,13 @@ import (
 
 const cleanupDbFileName = "cleanup.db.bolt"
 
-var cleanupBucket = []byte("cleanup")
+var (
+	cleanupSegmentsBucket  = []byte("segments")
+	cleanupMetaBucket      = []byte("meta")
+	cleanupMetaKeyTsOldest = []byte("tsOldest")
+)
 
-var cleanupInterval = time.Minute * 1 // TODO AL: env configured
+var cleanupInterval = time.Second * 150 // TODO AL: env configured
 
 func (sg *SegmentGroup) isCleanupSupported() bool {
 	switch sg.strategy {
@@ -61,11 +65,19 @@ func (sg *SegmentGroup) initCleanupDBIfSupported() error {
 		}
 
 		err = db.Update(func(tx *bolt.Tx) error {
-			_, err := tx.CreateBucketIfNotExists(cleanupBucket)
+			_, err := tx.CreateBucketIfNotExists(cleanupSegmentsBucket)
 			return err
 		})
 		if err != nil {
-			return fmt.Errorf("bucket cleanup bolt db %q: %w", path, err)
+			return fmt.Errorf("segments bucket cleanup bolt db %q: %w", path, err)
+		}
+
+		err = db.Update(func(tx *bolt.Tx) error {
+			_, err := tx.CreateBucketIfNotExists(cleanupMetaBucket)
+			return err
+		})
+		if err != nil {
+			return fmt.Errorf("meta bucket cleanup bolt db %q: %w", path, err)
 		}
 
 		sg.cleanupDB = db
@@ -177,12 +189,15 @@ func (sg *SegmentGroup) cleanupOnce(shouldAbort cyclemanager.ShouldAbortCallback
 type onCleanupCompletedFunc func(size int64) error
 
 func (sg *SegmentGroup) findCleanupCandidate() (int, onCleanupCompletedFunc, error) {
+	t := func(ts int64) time.Time {
+		return time.Unix(0, 0).Add(time.Duration(ts))
+	}
+
 	noCandidate := -1
-	var noopOnCompleted onCleanupCompletedFunc = nil
 
 	if sg.isReadyOnly() {
 		fmt.Printf("  ==> no candidate / read only\n")
-		return noCandidate, noopOnCompleted, nil
+		return noCandidate, nil, nil
 	}
 
 	var count int
@@ -210,22 +225,39 @@ func (sg *SegmentGroup) findCleanupCandidate() (int, onCleanupCompletedFunc, err
 	}()
 	if err != nil {
 		fmt.Printf("  ==> no candidate / segments read, err [%s]\n", err)
-		return noCandidate, noopOnCompleted, err
+		return noCandidate, nil, err
 	}
 	if count <= 1 {
 		fmt.Printf("  ==> no candidate / len [%d]\n", count)
-		return noCandidate, noopOnCompleted, nil
+		return noCandidate, nil, nil
 	}
 
 	now := time.Now()
 	tsOldest := now.UnixNano()
 	tsThreshold := now.Add(-cleanupInterval).UnixNano()
+	tsOldestStored := int64(0)
+
+	sg.cleanupDB.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(cleanupMetaBucket)
+
+		v := b.Get(cleanupMetaKeyTsOldest)
+		if v != nil {
+			tsOldestStored = int64(binary.BigEndian.Uint64(v))
+		}
+		return nil
+	})
+
+	if tsOldestStored > tsThreshold {
+		fmt.Printf("  ==> no candidate / tsOldestStored [%s] > tsThreshold [%s]\n", t(tsOldestStored), t(tsThreshold))
+		return noCandidate, nil, nil
+	}
+	fmt.Printf("  ==> CONTINUING tsOldestStored [%s] <= tsThreshold [%s]\n", t(tsOldestStored), t(tsThreshold))
 
 	kToDelete := [][]byte{}
 	candidateIdx := noCandidate
 
 	err = sg.cleanupDB.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(cleanupBucket)
+		b := tx.Bucket(cleanupSegmentsBucket)
 		c := b.Cursor()
 
 		idx := 0
@@ -244,7 +276,7 @@ func (sg *SegmentGroup) findCleanupCandidate() (int, onCleanupCompletedFunc, err
 				kToDelete = append(kToDelete, ck)
 				ck, cv = c.Next()
 			} else if id < cid {
-				fmt.Printf("    ==> id < cid ; tsOldest [%d]\n", tsOldest)
+				fmt.Printf("    ==> id < cid ; tsOldest [%s]\n", t(tsOldest))
 				// id not yet present in bolt
 				if tsOldest > 0 {
 					fmt.Printf("    ==> tsOldest > 0\n")
@@ -259,7 +291,7 @@ func (sg *SegmentGroup) findCleanupCandidate() (int, onCleanupCompletedFunc, err
 				fmt.Printf("    ==> id = cid ; size [%d] csize [%d]\n", size, csize)
 				if size != csize {
 					cts := int64(binary.BigEndian.Uint64(cv[0:8]))
-					fmt.Printf("    ==> size != csize ; tsOldest [%d] cts [%d]\n", tsOldest, cts)
+					fmt.Printf("    ==> size != csize ; tsOldest [%s] cts [%s]\n", t(tsOldest), t(cts))
 					if tsOldest > cts {
 						fmt.Printf("    ==> tsOldest > cts\n")
 						tsOldest = cts
@@ -280,7 +312,7 @@ func (sg *SegmentGroup) findCleanupCandidate() (int, onCleanupCompletedFunc, err
 		}
 		// in case 1st loop finished due to cursor finished
 		for ; idx < count-1 && tsOldest > 0; idx++ {
-			fmt.Printf("  ==> idx loop ; tsOldest [%d]\n", tsOldest)
+			fmt.Printf("  ==> idx loop ; tsOldest [%s]\n", t(tsOldest))
 			tsOldest = 0
 			candidateIdx = idx
 		}
@@ -288,12 +320,12 @@ func (sg *SegmentGroup) findCleanupCandidate() (int, onCleanupCompletedFunc, err
 	})
 	if err != nil {
 		fmt.Printf("  ==> no candidate / searching, err [%s]\n", err)
-		return noCandidate, noopOnCompleted, fmt.Errorf("searching cleanup bolt %q: %w", sg.cleanupDB.Path(), err)
+		return noCandidate, nil, fmt.Errorf("searching cleanup bolt %q: %w", sg.cleanupDB.Path(), err)
 	}
 
 	if len(kToDelete) > 0 {
 		err = sg.cleanupDB.Update(func(tx *bolt.Tx) error {
-			b := tx.Bucket(cleanupBucket)
+			b := tx.Bucket(cleanupSegmentsBucket)
 
 			for _, k := range kToDelete {
 				if err := b.Delete(k); err != nil {
@@ -304,20 +336,20 @@ func (sg *SegmentGroup) findCleanupCandidate() (int, onCleanupCompletedFunc, err
 		})
 		if err != nil {
 			fmt.Printf("  ==> no candidate / deleting, err [%s]\n", err)
-			return noCandidate, noopOnCompleted, fmt.Errorf("deleting from cleanup bolt %q: %w", sg.cleanupDB.Path(), err)
+			return noCandidate, nil, fmt.Errorf("deleting from cleanup bolt %q: %w", sg.cleanupDB.Path(), err)
 		}
 	}
 
-	if candidateIdx != noCandidate && tsOldest < tsThreshold {
+	if candidateIdx != noCandidate && tsOldest <= tsThreshold {
 		id := ids[candidateIdx]
 		onCompleted := func(newSize int64) error {
 			err := sg.cleanupDB.Update(func(tx *bolt.Tx) error {
-				b := tx.Bucket(cleanupBucket)
+				b := tx.Bucket(cleanupSegmentsBucket)
 				bufK := make([]byte, 8)
 				bufV := make([]byte, 16)
 
-				fmt.Printf("  ==> storing candidate idx [%d] id [%d] ts [%d]\n",
-					candidateIdx, id, tsOldest)
+				fmt.Printf("  ==> storing candidate idx [%d] id [%d] ts [%s]\n",
+					candidateIdx, id, t(tsOldest))
 
 				binary.BigEndian.PutUint64(bufK, id)
 				binary.BigEndian.PutUint64(bufV[0:8], uint64(now.UnixNano()))
@@ -333,8 +365,19 @@ func (sg *SegmentGroup) findCleanupCandidate() (int, onCleanupCompletedFunc, err
 		return candidateIdx, onCompleted, nil
 	}
 
-	fmt.Printf("  ==> no candidate / end\n")
-	return noCandidate, noopOnCompleted, nil
+	err = sg.cleanupDB.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(cleanupMetaBucket)
+		buf := make([]byte, 8)
+		binary.BigEndian.PutUint64(buf, uint64(tsOldest))
+		return b.Put(cleanupMetaKeyTsOldest, buf)
+	})
+	if err != nil {
+		fmt.Printf("  ==> no candidate / updating tsOldest, err [%s]\n", err)
+		return noCandidate, nil, fmt.Errorf("updating cleanup bolt %q: %w", sg.cleanupDB.Path(), err)
+	}
+
+	fmt.Printf("  ==> no candidate / updated tsOldest [%s] ; tsThreshold [%s]\n", t(tsOldest), t(tsThreshold))
+	return noCandidate, nil, nil
 }
 
 func (sg *SegmentGroup) replaceCleanedSegment(segmentIdx int, tmpSegmentPath string,
