@@ -546,6 +546,7 @@ type IndexConfig struct {
 	MemtablesMaxSizeMB               int
 	MemtablesMinActiveSeconds        int
 	MemtablesMaxActiveSeconds        int
+	SegmentsCleanupIntervalHours     int64
 	MaxSegmentSize                   int64
 	HNSWMaxLogSize                   int64
 	HNSWWaitForCachePrefill          bool
@@ -554,8 +555,7 @@ type IndexConfig struct {
 	AvoidMMap                        bool
 	DisableLazyLoadShards            bool
 	ForceFullReplicasSearch          bool
-
-	TrackVectorDimensions bool
+	TrackVectorDimensions            bool
 }
 
 func indexID(class schema.ClassName) string {

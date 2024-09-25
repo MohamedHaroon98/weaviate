@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/sirupsen/logrus"
 	"github.com/weaviate/weaviate/adapters/repos/db/roaringset"
@@ -66,7 +67,8 @@ type SegmentGroup struct {
 	allocChecker   memwatch.AllocChecker
 	maxSegmentSize int64
 
-	cleanupDB *bolt.DB
+	cleanupDB       *bolt.DB
+	cleanupInterval time.Duration
 }
 
 type sgConfig struct {
@@ -80,6 +82,7 @@ type sgConfig struct {
 	calcCountNetAdditions bool
 	forceCompaction       bool
 	maxSegmentSize        int64
+	cleanupInterval       time.Duration
 }
 
 func newSegmentGroup(logger logrus.FieldLogger, metrics *Metrics,
@@ -105,6 +108,7 @@ func newSegmentGroup(logger logrus.FieldLogger, metrics *Metrics,
 		calcCountNetAdditions:   cfg.calcCountNetAdditions,
 		compactLeftOverSegments: cfg.forceCompaction,
 		maxSegmentSize:          cfg.maxSegmentSize,
+		cleanupInterval:         cfg.cleanupInterval,
 		allocChecker:            allocChecker,
 	}
 

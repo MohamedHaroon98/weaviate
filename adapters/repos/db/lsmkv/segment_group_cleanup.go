@@ -32,9 +32,13 @@ var (
 	cleanupMetaKeyTsOldest = []byte("tsOldest")
 )
 
-var cleanupInterval = time.Second * 150 // TODO AL: env configured
-
 func (sg *SegmentGroup) isCleanupSupported() bool {
+	fmt.Printf("  ==> isCleanupSupported [%s] / cleanup interval [%s]\n", sg.dir, sg.cleanupInterval)
+
+	if sg.cleanupInterval <= 0 {
+		return false
+	}
+
 	switch sg.strategy {
 	case StrategyReplace:
 		return true
@@ -234,7 +238,7 @@ func (sg *SegmentGroup) findCleanupCandidate() (int, onCleanupCompletedFunc, err
 
 	now := time.Now()
 	tsOldest := now.UnixNano()
-	tsThreshold := now.Add(-cleanupInterval).UnixNano()
+	tsThreshold := now.Add(-sg.cleanupInterval).UnixNano()
 	tsOldestStored := int64(0)
 
 	sg.cleanupDB.View(func(tx *bolt.Tx) error {

@@ -591,6 +591,7 @@ func (s *Shard) initLSMStore(ctx context.Context) error {
 		s.memtableDirtyConfig(),
 		lsmkv.WithAllocChecker(s.index.allocChecker),
 		lsmkv.WithMaxSegmentSize(s.index.Config.MaxSegmentSize),
+		lsmkv.WithSegmentsCleanupInterval(s.index.Config.SegmentsCleanupIntervalHours),
 	}
 
 	if s.metrics != nil && !s.metrics.grouped {
@@ -722,6 +723,7 @@ func (s *Shard) addIDProperty(ctx context.Context) error {
 		lsmkv.WithPread(s.index.Config.AvoidMMap),
 		lsmkv.WithAllocChecker(s.index.allocChecker),
 		lsmkv.WithMaxSegmentSize(s.index.Config.MaxSegmentSize),
+		lsmkv.WithSegmentsCleanupInterval(s.index.Config.SegmentsCleanupIntervalHours),
 	)
 }
 
@@ -738,6 +740,7 @@ func (s *Shard) addDimensionsProperty(ctx context.Context) error {
 		lsmkv.WithPread(s.index.Config.AvoidMMap),
 		lsmkv.WithAllocChecker(s.index.allocChecker),
 		lsmkv.WithMaxSegmentSize(s.index.Config.MaxSegmentSize),
+		lsmkv.WithSegmentsCleanupInterval(s.index.Config.SegmentsCleanupIntervalHours),
 	)
 	if err != nil {
 		return err
@@ -769,6 +772,7 @@ func (s *Shard) addCreationTimeUnixProperty(ctx context.Context) error {
 		lsmkv.WithPread(s.index.Config.AvoidMMap),
 		lsmkv.WithAllocChecker(s.index.allocChecker),
 		lsmkv.WithMaxSegmentSize(s.index.Config.MaxSegmentSize),
+		lsmkv.WithSegmentsCleanupInterval(s.index.Config.SegmentsCleanupIntervalHours),
 	)
 }
 
@@ -780,6 +784,7 @@ func (s *Shard) addLastUpdateTimeUnixProperty(ctx context.Context) error {
 		lsmkv.WithPread(s.index.Config.AvoidMMap),
 		lsmkv.WithAllocChecker(s.index.allocChecker),
 		lsmkv.WithMaxSegmentSize(s.index.Config.MaxSegmentSize),
+		lsmkv.WithSegmentsCleanupInterval(s.index.Config.SegmentsCleanupIntervalHours),
 	)
 }
 
@@ -840,6 +845,7 @@ func (s *Shard) createPropertyValueIndex(ctx context.Context, prop *models.Prope
 		lsmkv.WithPread(s.index.Config.AvoidMMap),
 		lsmkv.WithAllocChecker(s.index.allocChecker),
 		lsmkv.WithMaxSegmentSize(s.index.Config.MaxSegmentSize),
+		lsmkv.WithSegmentsCleanupInterval(s.index.Config.SegmentsCleanupIntervalHours),
 	}
 
 	if inverted.HasFilterableIndex(prop) {
@@ -901,6 +907,7 @@ func (s *Shard) createPropertyLengthIndex(ctx context.Context, prop *models.Prop
 		lsmkv.WithPread(s.index.Config.AvoidMMap),
 		lsmkv.WithAllocChecker(s.index.allocChecker),
 		lsmkv.WithMaxSegmentSize(s.index.Config.MaxSegmentSize),
+		lsmkv.WithSegmentsCleanupInterval(s.index.Config.SegmentsCleanupIntervalHours),
 	)
 }
 
@@ -915,6 +922,7 @@ func (s *Shard) createPropertyNullIndex(ctx context.Context, prop *models.Proper
 		lsmkv.WithPread(s.index.Config.AvoidMMap),
 		lsmkv.WithAllocChecker(s.index.allocChecker),
 		lsmkv.WithMaxSegmentSize(s.index.Config.MaxSegmentSize),
+		lsmkv.WithSegmentsCleanupInterval(s.index.Config.SegmentsCleanupIntervalHours),
 	)
 }
 
