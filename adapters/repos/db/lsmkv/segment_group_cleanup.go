@@ -119,11 +119,11 @@ func (c *segmentCleanerImpl) findCandidate() (int, onCompletedFunc, error) {
 
 	if nextAllowedStoredTs > nextAllowedTs {
 		// Too soon for next cleanup
-		fmt.Printf("  ==> no candidate / earliestAllowedStoredTs [%s] > earliestAllowedTs [%s]\n",
+		fmt.Printf("  ==> no candidate / nextAllowedStoredTs [%s] > nextAllowedTs [%s]\n",
 			t(nextAllowedStoredTs), t(nextAllowedTs))
 		return noCandidate, nil, nil
 	}
-	fmt.Printf("  ==> CONTINUING  / earliestAllowedStoredTs [%s] <= earliestAllowedTs [%s]\n",
+	fmt.Printf("  ==> CONTINUING  / nextAllowedStoredTs [%s] <= nextAllowedTs [%s]\n",
 		t(nextAllowedStoredTs), t(nextAllowedTs))
 
 	ids, sizes, err := c.getSegmentIdsAndSizes()
@@ -389,66 +389,66 @@ func (c *segmentCleanerImpl) cleanupOnce(shouldAbort cyclemanager.ShouldAbortCal
 		return false, fmt.Errorf("close cleaned segment file: %w", err)
 	}
 
-	newSize, err := c.replaceCleanedSegment(segmentIdx, tmpSegmentPath)
+	newSegment, err := c.sg.replaceSegment(segmentIdx, tmpSegmentPath)
 	if err != nil {
 		return false, fmt.Errorf("replace compacted segments: %w", err)
 	}
-	if err := onCompleted(newSize); err != nil {
+	if err := onCompleted(newSegment.size); err != nil {
 		return false, fmt.Errorf("callback cleaned segment file: %w", err)
 	}
 
 	return true, nil
 }
 
-func (c *segmentCleanerImpl) replaceCleanedSegment(segmentIdx int, tmpSegmentPath string,
-) (int64, error) {
-	oldSegment := c.sg.segmentAtPos(segmentIdx)
-	countNetAdditions := oldSegment.countNetAdditions
+// func (c *segmentCleanerImpl) replaceCleanedSegment(segmentIdx int, tmpSegmentPath string,
+// ) (int64, error) {
+// 	oldSegment := c.sg.segmentAtPos(segmentIdx)
+// 	countNetAdditions := oldSegment.countNetAdditions
 
-	precomputedFiles, err := preComputeSegmentMeta(tmpSegmentPath, countNetAdditions,
-		c.sg.logger, c.sg.useBloomFilter, c.sg.calcCountNetAdditions)
-	if err != nil {
-		return 0, fmt.Errorf("precompute segment meta: %w", err)
-	}
+// 	precomputedFiles, err := preComputeSegmentMeta(tmpSegmentPath, countNetAdditions,
+// 		c.sg.logger, c.sg.useBloomFilter, c.sg.calcCountNetAdditions)
+// 	if err != nil {
+// 		return 0, fmt.Errorf("precompute segment meta: %w", err)
+// 	}
 
-	c.sg.maintenanceLock.Lock()
-	defer c.sg.maintenanceLock.Unlock()
+// 	c.sg.maintenanceLock.Lock()
+// 	defer c.sg.maintenanceLock.Unlock()
 
-	if err := oldSegment.close(); err != nil {
-		return 0, fmt.Errorf("close disk segment %q: %w", oldSegment.path, err)
-	}
-	if err := oldSegment.drop(); err != nil {
-		return 0, fmt.Errorf("drop disk segment %q: %w", oldSegment.path, err)
-	}
-	if err := fsync(c.sg.dir); err != nil {
-		return 0, fmt.Errorf("fsync segment directory %q: %w", c.sg.dir, err)
-	}
+// 	if err := oldSegment.close(); err != nil {
+// 		return 0, fmt.Errorf("close disk segment %q: %w", oldSegment.path, err)
+// 	}
+// 	if err := oldSegment.drop(); err != nil {
+// 		return 0, fmt.Errorf("drop disk segment %q: %w", oldSegment.path, err)
+// 	}
+// 	if err := fsync(c.sg.dir); err != nil {
+// 		return 0, fmt.Errorf("fsync segment directory %q: %w", c.sg.dir, err)
+// 	}
 
-	segmentId := segmentID(oldSegment.path)
-	var segmentPath string
+// 	segmentId := segmentID(oldSegment.path)
+// 	var segmentPath string
 
-	// the old segment have been deleted, we can now safely remove the .tmp
-	// extension from the new segment itself and the pre-computed files
-	for i, tmpPath := range precomputedFiles {
-		path, err := c.sg.stripTmpExtension(tmpPath, segmentId, segmentId)
-		if err != nil {
-			return 0, fmt.Errorf("strip .tmp extension of new segment %q: %w", tmpPath, err)
-		}
-		if i == 0 {
-			// the first element in the list is the segment itself
-			segmentPath = path
-		}
-	}
+// 	// the old segment have been deleted, we can now safely remove the .tmp
+// 	// extension from the new segment itself and the pre-computed files
+// 	for i, tmpPath := range precomputedFiles {
+// 		path, err := c.sg.stripTmpExtension(tmpPath, segmentId, segmentId)
+// 		if err != nil {
+// 			return 0, fmt.Errorf("strip .tmp extension of new segment %q: %w", tmpPath, err)
+// 		}
+// 		if i == 0 {
+// 			// the first element in the list is the segment itself
+// 			segmentPath = path
+// 		}
+// 	}
 
-	newSegment, err := newSegment(segmentPath, c.sg.logger, c.sg.metrics, nil,
-		c.sg.mmapContents, c.sg.useBloomFilter, c.sg.calcCountNetAdditions, false)
-	if err != nil {
-		return 0, fmt.Errorf("create new segment %q: %w", newSegment.path, err)
-	}
+// 	newSegment, err := newSegment(segmentPath, c.sg.logger, c.sg.metrics, nil,
+// 		c.sg.mmapContents, c.sg.useBloomFilter, c.sg.calcCountNetAdditions, false)
+// 	if err != nil {
+// 		return 0, fmt.Errorf("create new segment %q: %w", newSegment.path, err)
+// 	}
 
-	c.sg.segments[segmentIdx] = newSegment
-	return newSegment.size, nil
-}
+// 	c.sg.segments[segmentIdx] = newSegment
+// 	return newSegment.size, nil
+// }
 
 // ================================================================
 
@@ -812,52 +812,52 @@ type onCompletedFunc func(size int64) error
 // 	return noCandidate, nil, nil
 // }
 
-// func (sg *SegmentGroup) replaceCleanedSegment(segmentIdx int, tmpSegmentPath string,
-// ) error {
-// 	oldSegment := sg.segmentAtPos(segmentIdx)
-// 	countNetAdditions := oldSegment.countNetAdditions
+func (sg *SegmentGroup) replaceSegment(segmentIdx int, tmpSegmentPath string,
+) (*segment, error) {
+	oldSegment := sg.segmentAtPos(segmentIdx)
+	countNetAdditions := oldSegment.countNetAdditions
 
-// 	precomputedFiles, err := preComputeSegmentMeta(tmpSegmentPath, countNetAdditions,
-// 		sg.logger, sg.useBloomFilter, sg.calcCountNetAdditions)
-// 	if err != nil {
-// 		return fmt.Errorf("precompute segment meta: %w", err)
-// 	}
+	precomputedFiles, err := preComputeSegmentMeta(tmpSegmentPath, countNetAdditions,
+		sg.logger, sg.useBloomFilter, sg.calcCountNetAdditions)
+	if err != nil {
+		return nil, fmt.Errorf("precompute segment meta: %w", err)
+	}
 
-// 	sg.maintenanceLock.Lock()
-// 	defer sg.maintenanceLock.Unlock()
+	sg.maintenanceLock.Lock()
+	defer sg.maintenanceLock.Unlock()
 
-// 	if err := oldSegment.close(); err != nil {
-// 		return fmt.Errorf("close disk segment %q: %w", oldSegment.path, err)
-// 	}
-// 	if err := oldSegment.drop(); err != nil {
-// 		return fmt.Errorf("drop disk segment %q: %w", oldSegment.path, err)
-// 	}
-// 	if err := fsync(sg.dir); err != nil {
-// 		return fmt.Errorf("fsync segment directory %q: %w", sg.dir, err)
-// 	}
+	if err := oldSegment.close(); err != nil {
+		return nil, fmt.Errorf("close disk segment %q: %w", oldSegment.path, err)
+	}
+	if err := oldSegment.drop(); err != nil {
+		return nil, fmt.Errorf("drop disk segment %q: %w", oldSegment.path, err)
+	}
+	if err := fsync(sg.dir); err != nil {
+		return nil, fmt.Errorf("fsync segment directory %q: %w", sg.dir, err)
+	}
 
-// 	segmentId := segmentID(oldSegment.path)
-// 	var segmentPath string
+	segmentId := segmentID(oldSegment.path)
+	var segmentPath string
 
-// 	// the old segment have been deleted, we can now safely remove the .tmp
-// 	// extension from the new segment itself and the pre-computed files
-// 	for i, tmpPath := range precomputedFiles {
-// 		path, err := sg.stripTmpExtension(tmpPath, segmentId, segmentId)
-// 		if err != nil {
-// 			return fmt.Errorf("strip .tmp extension of new segment %q: %w", tmpPath, err)
-// 		}
-// 		if i == 0 {
-// 			// the first element in the list is the segment itself
-// 			segmentPath = path
-// 		}
-// 	}
+	// the old segment have been deleted, we can now safely remove the .tmp
+	// extension from the new segment itself and the pre-computed files
+	for i, tmpPath := range precomputedFiles {
+		path, err := sg.stripTmpExtension(tmpPath, segmentId, segmentId)
+		if err != nil {
+			return nil, fmt.Errorf("strip .tmp extension of new segment %q: %w", tmpPath, err)
+		}
+		if i == 0 {
+			// the first element in the list is the segment itself
+			segmentPath = path
+		}
+	}
 
-// 	newSegment, err := newSegment(segmentPath, sg.logger, sg.metrics, nil,
-// 		sg.mmapContents, sg.useBloomFilter, sg.calcCountNetAdditions, false)
-// 	if err != nil {
-// 		return fmt.Errorf("create new segment %q: %w", newSegment.path, err)
-// 	}
+	newSegment, err := newSegment(segmentPath, sg.logger, sg.metrics, nil,
+		sg.mmapContents, sg.useBloomFilter, sg.calcCountNetAdditions, false)
+	if err != nil {
+		return nil, fmt.Errorf("create new segment %q: %w", newSegment.path, err)
+	}
 
-// 	sg.segments[segmentIdx] = newSegment
-// 	return nil
-// }
+	sg.segments[segmentIdx] = newSegment
+	return newSegment, nil
+}
